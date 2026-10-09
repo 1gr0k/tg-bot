@@ -10,6 +10,7 @@ Telegram-бот: скачивает медиа по ссылкам на Instagra
 - `ruff` (формат и линт, правила в `pyproject.toml`) и `pytest` — в dev-группе, только через `uv run`.
 - Стек бота (с этапа 1): aiogram 3, yt-dlp как библиотека, FFmpeg. Развёртывание — Docker compose.
 - macOS: `/bin/bash` 3.2 и BSD-утилиты — скрипты и хуки пишутся под них.
+- Разовые команды в сессии выполняет zsh (нет `PIPESTATUS`, нет разбиения слов), скрипты — `#!/bin/bash`.
 
 ## Commands
 
