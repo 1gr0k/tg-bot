@@ -1,7 +1,8 @@
 .env
-data/
+/data/
 .venv/
 .build/
 __pycache__/
 .DS_Store
 .claude/settings.local.json
+.test-hooks.*
