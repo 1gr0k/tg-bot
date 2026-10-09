@@ -32,7 +32,7 @@
       "Bash(perl*)",
       "Bash(ruby*)",
       "Read(**/.env)",
-      "Read(**/data/**)"
+      "Read(/data/**)"
     ]
   },
   "hooks": {
