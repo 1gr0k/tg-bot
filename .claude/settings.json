@@ -29,6 +29,7 @@
       "Bash(python3 -c*)",
       "Bash(python3 -*)",
       "Bash(uv run python -c*)",
+      "Bash(uv run python3 -c*)",
       "Bash(perl*)",
       "Bash(ruby*)",
       "Read(**/.env)",
