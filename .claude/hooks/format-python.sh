@@ -6,9 +6,15 @@
 # импорт между двумя правками, когда агент добавил его одним Edit, а использует следующим.
 # Такой импорт остаётся замечанием: агент увидит его и либо использует, либо удалит сам.
 #
-# Exit 2 — синтаксическая ошибка, оставшиеся замечания или недоступный ruff; stderr уходит Claude.
+# Файл-симлинк, файл вне проекта и не-.py пропускаются (exit 0).
+# Exit 2 — синтаксическая ошибка, оставшиеся замечания, недоступные ruff/uv/jq; stderr уходит Claude.
 # Кейсы — scripts/test-hooks.sh.
 set -euo pipefail
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "format-python: jq не найден в PATH — файл не проверен." >&2
+    exit 2
+fi
 
 input=$(cat)
 file_path=$(jq -r '.tool_input.file_path // empty' <<<"$input")
@@ -17,6 +23,8 @@ file_path=$(jq -r '.tool_input.file_path // empty' <<<"$input")
 project=${CLAUDE_PROJECT_DIR:-$PWD}
 [[ "$file_path" == /* ]] || file_path="$project/$file_path"
 [[ -f "$file_path" ]] || exit 0
+# Сам файл — симлинк: ruff переписал бы цель, а она может лежать вне проекта.
+[[ ! -L "$file_path" ]] || exit 0
 
 # Физические пути: `..` и симлинки (/tmp → /private/tmp) не обманывают проверку «внутри проекта».
 project=$(cd "$project" && pwd -P)

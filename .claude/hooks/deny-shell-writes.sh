@@ -14,9 +14,15 @@
 # команде или по окружению; значение из `$(…)` (например, mktemp) не проверяется; не
 # вычислилась — запрет. `>` внутри `((…))` и `[[…]]` — сравнение, а не перенаправление.
 # Известные пропуски: второй heredoc в одной строке, `<<` внутри кавычек.
-# Exit 2 возвращает сообщение Claude. Кейсы — scripts/test-hooks.sh.
+# Exit 2 возвращает сообщение Claude; без jq хук тоже закрывается (exit 2). Кейсы — scripts/test-hooks.sh.
 set -euo pipefail
 set -f # аргументы tee разбиваются на слова без раскрытия масок
+
+# Fail-closed: PreToolUse открывает любой код, кроме 2, — без jq хук молча пропускал бы всё.
+if ! command -v jq >/dev/null 2>&1; then
+    echo "deny-shell-writes: jq не найден в PATH — команда не проверена и заблокирована." >&2
+    exit 2
+fi
 
 input=$(cat)
 command=$(jq -r '.tool_input.command // empty' <<<"$input")
