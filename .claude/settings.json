@@ -18,7 +18,13 @@
       "Bash(gh pr view*)",
       "Bash(gh pr checks*)"
     ],
-    "ask":  ["Bash(git push*)"],
+    "ask": [
+      "Bash(git push*)",
+      "Edit(/.claude/settings.json)",
+      "Write(/.claude/settings.json)",
+      "Edit(/.claude/hooks/**)",
+      "Write(/.claude/hooks/**)"
+    ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git push -f*)",
