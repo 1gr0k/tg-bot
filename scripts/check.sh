@@ -1,8 +1,9 @@
 #!/bin/bash
-# Проверки проекта: секции lint (ruff format --check, ruff check) и test (pytest).
+# Проверки проекта: секции lint (ruff format --check, ruff check), hooks (scripts/test-hooks.sh)
+# и test (pytest).
 #
-#   scripts/check.sh                      все секции
-#   scripts/check.sh --only lint|test     одна секция
+#   scripts/check.sh                          все секции
+#   scripts/check.sh --only lint|hooks|test   одна секция
 #   scripts/check.sh --test <node id>     один тест pytest (например, tests/test_x.py::test_y)
 #
 # Полный вывод — в .build/check-logs/<секция>.log (для --test — test-single.log); при провале
@@ -18,7 +19,7 @@ cd "$root"
 logs=.build/check-logs
 
 usage() {
-    echo "usage: scripts/check.sh [--only lint|test] [--test <pytest node id>]" >&2
+    echo "usage: scripts/check.sh [--only lint|hooks|test] [--test <pytest node id>]" >&2
     exit 64
 }
 
@@ -39,7 +40,7 @@ while (($# > 0)); do
         *) usage ;;
     esac
 done
-case "$only" in "" | lint | test) ;; *) usage ;; esac
+case "$only" in "" | lint | hooks | test) ;; *) usage ;; esac
 [[ -z "$only" || -z "$single" ]] || usage
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -99,6 +100,7 @@ section() {
 }
 
 lint_section() { lint "$1"; }
+hooks_section() { run "$1" scripts/test-hooks.sh; }
 test_section() { pytest_run "$1"; }
 single_section() { pytest_run "$1" -v "$single"; }
 
@@ -106,6 +108,7 @@ if [[ -n "$single" ]]; then
     section "test-single" "$logs/test-single.log" single_section
 else
     [[ "$only" == "" || "$only" == lint ]] && section lint "$logs/lint.log" lint_section
+    [[ "$only" == "" || "$only" == hooks ]] && section hooks "$logs/hooks.log" hooks_section
     [[ "$only" == "" || "$only" == test ]] && section test "$logs/test.log" test_section
 fi
 

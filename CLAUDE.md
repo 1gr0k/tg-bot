@@ -14,9 +14,10 @@ Telegram-бот: скачивает медиа по ссылкам на Instagra
 ## Commands
 
 - `uv sync` — окружение по `uv.lock`.
-- `scripts/check.sh` — все проверки; `--only lint|test`; `--test <pytest node id>`.
+- `scripts/check.sh` — все проверки; `--only lint|hooks|test`; `--test <pytest node id>`.
   Логи — `.build/check-logs/`. Код pytest 5 («тесты не найдены») — провал.
-- `scripts/test-hooks.sh` — кейсы хуков из `.claude/hooks/`.
+- Секция `hooks` — `scripts/test-hooks.sh`, кейсы хуков из `.claude/hooks/`. Проверка хука на
+  зубы — только на копии: `HOOKS_DIR=<scratchpad>/hooks scripts/test-hooks.sh`.
 
 ## Architecture
 
@@ -48,8 +49,7 @@ Telegram-бот: скачивает медиа по ссылкам на Instagra
 
 ## Definition of done
 
-1. `scripts/check.sh` — код 0 (через `check-runner`).
+1. `scripts/check.sh` — код 0 (через `check-runner`; включает lint, hooks и test).
 2. Новые тесты прошли проверку на зубы (таблица в notes плана).
 3. `py-reviewer` на diff; замечания исправлены или записаны в план с причиной.
 4. Отклонения от плана внесены в план.
-5. Изменены хуки — `scripts/test-hooks.sh` зелёный.
