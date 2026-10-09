@@ -2,12 +2,17 @@
 # Кейсы хуков из .claude/hooks: вход хука → ожидаемый код возврата (и, где важно, результат).
 # Падает (exit 1), если провален хоть один кейс.
 #
+# HOOKS_DIR — каталог проверяемых хуков (по умолчанию .claude/hooks). Проверка на зубы — только
+# на копии: `HOOKS_DIR=<scratchpad>/hooks scripts/test-hooks.sh`. Мутация живого хука отключает
+# защиту в самой сессии (deny-shell-writes перестаёт блокировать запись).
+#
 # Временные .py для format-python лежат в скрытом каталоге внутри проекта: вне проекта хук их
 # пропускает, а в .build/ (он в .gitignore) их пропустит ruff. Каталог удаляется при выходе.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd -P)
-hooks=$root/.claude/hooks
+hooks=$(cd "${HOOKS_DIR:-$root/.claude/hooks}" && pwd -P)
+echo "hooks: $hooks"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-hooks.XXXXXX")
 work=$(cd "$work" && pwd -P)
 inproj=$(mktemp -d "$root/.test-hooks.XXXXXX")
