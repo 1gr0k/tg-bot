@@ -21,7 +21,7 @@ line-length = 100
 include = ["*.py", "*.pyi"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ASYNC"]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF", "BLE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
