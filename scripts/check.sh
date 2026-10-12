@@ -139,6 +139,11 @@ section() {
     else
         echo "--- tail of $log"
         tail -n 30 "$log"
+        # Хвост лога может не дойти до упавшего кейса (несколько скриптов в секции hooks).
+        if grep -qE '^FAIL' "$log"; then
+            echo "--- FAIL lines of $log"
+            grep -E '^FAIL' "$log" | head -n 40
+        fi
         echo "--- full log: $log"
         failed+=("$name")
     fi
