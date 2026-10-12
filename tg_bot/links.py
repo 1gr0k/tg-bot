@@ -7,7 +7,6 @@ entities `text_link` (извлекает обработчик).
 `PostKind.POST` — только отметка для лога; что внутри, решает загрузчик по ответу yt-dlp.
 """
 
-import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
