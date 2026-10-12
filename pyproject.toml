@@ -3,7 +3,10 @@ name = "tg-bot"
 version = "0.1.0"
 description = "Telegram-бот для загрузки медиа из Instagram и YouTube Shorts"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "aiogram>=3.31.0,<4",
+    "yt-dlp[default,deno]>=2026.8.19",
+]
 
 [dependency-groups]
 dev = [
