@@ -444,6 +444,8 @@ class MediaTooLarge(DownloadError): ...
 class DownloadTimeout(DownloadError): ...
 class NoMedia(DownloadError): ...            # публикация без поддерживаемых медиа
 class DownloadFailed(DownloadError): ...     # прочее (в т.ч. ошибка FFmpeg)
+# routing.py: class UnsupportedLink(DownloadError)  # изменено в части B: наследник DownloadError,
+#                                                   # pipeline ловит одним except
 
 # routing.py
 class DownloaderRegistry:

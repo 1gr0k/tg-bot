@@ -600,6 +600,39 @@ sleep: функция ждёт `threading.Event`, тест ждёт состоя
 Первые версии мутаций I9 и S8 были неверными (синтаксическая ошибка / `NameError` — тесты краснели
 не по делу); переписаны так, чтобы код оставался рабочим.
 
+### `tg_bot/routing.py` (`test_routing.py` 9) и `tests/fakes.py` (`test_fakes.py` 23, `test_downloader_contract.py` 14)
+
+`UnsupportedLink` — наследник `DownloadError` (с `user_message`): pipeline ловит и его одним `except`
+(в разделе 5 плана он был отдельным исключением; отклонение мелкое, отмечено в плане).
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| M1 | `KeyError` не переводится в `UnsupportedLink` | `test_platform_without_downloader_is_unsupported_not_keyerror`, `test_empty_registry_supports_nothing`, `test_registry_copies_mapping` |
+| M2 | реестр хранит исходный словарь, а не копию | `test_registry_copies_mapping` |
+| M3 | всегда загрузчик Instagram | `test_each_platform_goes_to_its_downloader` ×2 (YouTube), `…unsupported…`, `…copies_mapping` |
+| M4 | `UnsupportedLink` не `DownloadError` | `test_platform_without_downloader_is_unsupported_not_keyerror` |
+| M5 | (эквивалентная: `post` → Instagram — и так Instagram) | не падает, мутация отброшена |
+| F1 | фейк не бросает `NoMedia` на пустом | `test_empty_result_is_no_media`, контракт `no media-fake` |
+| F2 | нет лимита размера | `test_oversize_…` ×2, контракт `too large-fake` |
+| F3 | файлы пишутся в обратном порядке | `test_returns_items_in_order_inside_workdir` |
+| F4 | запись вне `workdir` | `test_returns_items_in_order_inside_workdir`, контракт `success-fake` ×2 |
+| F5 | нет проверки имени (путь вместо имени) | `test_writes_only_inside_workdir` ×5 |
+| F6 | принимает не-`DownloadError` | `test_only_port_errors_are_allowed` |
+| F7 | при отмене флаг не ставится | `test_cancellation_propagates_like_real_adapter` |
+| F8 | `gate` игнорируется | `test_gate_holds_download_until_released`, `test_cancellation_…` |
+| F9 | вместо `NoMedia` — `DownloadFailed` | `test_empty_result_is_no_media`, контракт `no media-fake` |
+
+**Сверка фейка с реализацией** (`test_downloader_contract.py`: один набор проверок для
+`FakeDownloader`, `InstagramDownloader` и `ShortsDownloader` на фейковом yt-dlp): успех (одно
+видео; фото + видео — исходный порядок, файлы только внутри `workdir`, непустой результат,
+`caption` — строка) и ошибки (`MediaNotFound`, `LoginRequired`, `MediaTooLarge`, `NoMedia` — **тот
+же тип** у каждой реализации, где сценарий возможен, `user_message` непуст, при ошибке записи
+вне `workdir` нет). Расхождения, которые контракт не скрывает и которые остаются: (1) фейк
+бросает ошибку **до** записи файлов, реальный адаптер может оставить в `workdir` копию cookies и
+частично скачанное — очистка каталога должна с этим справляться; (2) `DownloadTimeout` реальный
+адаптер получает от `ThreadRunner`, фейк — только если ему передать эту ошибку; (3) фейк не
+пропускает «неизвестные элементы» и не повторяет попытки по бюджету — это внутренности адаптеров.
+
 ### `tests/test_scrub.py` (17 тестов зелёные)
 
 Находка при снятии фикстур (п. 3): у YouTube подпись, `ip` (IP машины) и `expire` лежат **в пути**
