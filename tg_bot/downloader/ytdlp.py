@@ -280,7 +280,11 @@ def copy_cookies(source: Path | None, workdir: Path) -> CookiesCopy | None:
 
 
 def describe(exc: BaseException) -> str:
-    """Причина для лога: тип и текст (обрезан); значений cookies в тексте yt-dlp нет."""
+    """Причина для лога: тип и текст ошибки, одной строкой, до 300 символов.
+
+    Допущение, пробой не проверено: yt-dlp не вставляет значения cookies в тексты своих ошибок.
+    Страховка от протечки — только обрезка длины, фильтра значений нет.
+    """
     text = " ".join(str(exc).split())
     return f"{type(exc).__name__}: {text[:300]}"
 
