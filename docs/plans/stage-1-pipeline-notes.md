@@ -349,6 +349,18 @@ _Часть B: читатели info dict yt-dlp; часть C: читатели
 `gitleaks git --redact -v --no-banner --config .gitleaks.toml` (2026-10-13, ветка
 `stage-1-pipeline`): 28 коммитов, ~285 780 байт — `no leaks found`.
 
+## CI: sha256 архива gitleaks
+
+`GITLEAKS_SHA256` в `.github/workflows/ci.yml` — `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb`,
+строка для `gitleaks_8.30.1_linux_x64.tar.gz` из `gitleaks_8.30.1_checksums.txt` релиза v8.30.1
+(`https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/`), получена `curl` 2026-10-13
+00:04 (MSK; 2026-10-12T21:04Z). Источник — тот же релиз GitHub по HTTPS: значение защищает от
+последующей подмены архива, но не от того, что подмена была до записи. Смена версии — обновить
+оба значения вместе. Установка — `scripts/ci/install-gitleaks.sh` (оба job'а). Локально проверен на
+фейковом архиве (`GITLEAKS_BASE_URL=file://…`, `INSTALL_DIR`): совпадение — установлен; несовпадение
+— exit 1, ничего не установлено; не-hex и пустое значение — exit 1. Настоящий архив локально не
+скачивался; первая настоящая проверка — CI.
+
 ## Зубы: часть A
 
 Мутации — по одной на прогон, только на копиях (`GIT_HOOKS_SRC` / `GITLEAKS_CONFIG_SRC` у
