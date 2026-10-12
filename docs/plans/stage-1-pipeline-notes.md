@@ -328,6 +328,49 @@ getUpdates: получено 100 (offset не сдвигался, апдейты
 
 ## Аудит читателей
 
+Часть B (2026-10-13): читатели внешних данных — info dict yt-dlp, объекты ошибок yt-dlp, вывод
+ffprobe, файл cookies. Метод: перечислены все места кода, читающие чужие ключи; для каждого — что
+при отсутствии, `None`, незнакомом значении. Ожидание: пропуск с записью в лог либо понятная ошибка
+порта; остальные элементы публикации не теряются. Аудит нашёл три дыры (исправлены вместе с
+тестами, п. «Находки»).
+
+Тесты ниже: `I` — `test_instagram_info.py`, `D` — `test_instagram_downloader.py`, `S` —
+`test_shorts_downloader.py`, `R` — `test_info_readers.py`, `E` — `test_ytdlp_errors.py`, `B` —
+`test_ytdlp_budget.py`.
+
+| Читатель | Ключ | Нет ключа | `None` | Незнакомое значение | Тесты |
+|---|---|---|---|---|---|
+| `instagram.entries_of` | сам `info` | `NoMedia` | `NoMedia` | не словарь → предупреждение, нет элементов → `NoMedia` | I `test_info_not_a_dict_gives_no_entries`; D `test_nothing_usable_is_no_media` |
+| `instagram.entries_of` | `entries` | одиночная публикация | одиночная | не список → одиночная; пустой список → `NoMedia`; не-словари внутри → пропуск с логом, остальные целы | I `test_entries_not_a_list_means_single_publication`, `test_non_dict_entries_are_skipped_with_log`, `test_empty_entries_list_gives_no_entries` |
+| `instagram.classify` | `formats` | фото (если есть `thumbnails`), иначе пропуск | то же | не список → как нет; непустой → видео | I `test_classify_tolerates_missing_and_odd_values` |
+| `instagram.classify` / `pick_photo_url` | `thumbnails` | пропуск элемента с логом «ни форматов, ни превью» | то же | не список → `None`; элементы не словари → пропускаются | I `test_pick_photo_url_tolerates_garbage`, `…skips_bad_items_but_keeps_good_ones`; D `test_unknown_entry_is_skipped_but_rest_is_delivered` |
+| `instagram.pick_photo_url` | `thumbnails[].url` | вариант пропущен | вариант пропущен | не строка/пустая → пропущен; все негодные → фото пропущено с логом, остальные элементы целы | I `test_pick_photo_url_tolerates_garbage`; R `test_reader_thumbnails_without_usable_url_skips_photo_with_log` ×5 |
+| `instagram._size_marker` | параметр `stp` в URL | вариант «без маркера» (оригинал) | — | нет маркера → оригинал; маркер только из `stp`, не из пути/других параметров; гигантские цифры → не маркер, без `ValueError` | I `test_url_without_stp_counts_as_unmarked`, `test_size_marker_is_read_only_from_stp_parameter`; R `test_reader_thumbnail_stp_huge_digits_do_not_crash` |
+| `instagram.caption_of` | `description` (верх, затем элементы) | `""` | `""` | не строка / пробелы → `""`; берётся первый непустой | I `test_caption_missing_or_odd_is_empty_string`, `test_caption_from_top_level_and_from_entry` |
+| `shorts.caption_of` | `description`, затем `title` | `title`, иначе `""` | то же | не строка/пробелы → следующий, иначе `""` | S `test_caption_description_then_title_then_empty` |
+| `instagram.downloaded_path` (и Shorts) | `requested_downloads[].filepath` | путь неизвестен → `None` | `None` | не список / элементы не словари / `filepath` не строка или пустой → `None` | I `test_downloaded_path` |
+| `InstagramDownloader._fetch_video` | результат `process_ie_result` | видео пропущено с логом, остальное цело; единственное → `NoMedia` | то же | не словарь → то же; путь есть, файла нет → `MediaTooLarge` (проба `max_filesize`) | R `test_reader_process_result_without_filepath_skips_video_keeps_photo` ×4, `…for_only_video_is_no_media`; D `test_video_skipped_by_max_filesize_is_too_large` |
+| `ShortsDownloader` | `requested_downloads` | `DownloadFailed` без повторов бюджета (не «слишком большой»); путь есть, файла нет → следующий уровень | то же | — | R `test_reader_requested_downloads_missing_in_shorts_is_download_failed_not_too_large`; S `test_file_skipped_by_max_filesize_counts_as_too_large` |
+| `ytdlp._http_status` | `status`, `exc_info`, `cause`, `__cause__` | не 429 → общая ошибка | то же | не `int` → не лимит; цепочка с циклом не зависает | E `test_translate_error[…429]`, `test_translate_error[…]` (cause); R `test_reader_error_status_not_an_int_is_not_rate_limit` ×4, `test_reader_error_chain_with_cycle_does_not_hang` |
+| `ytdlp.translate_error` | текст ошибки | пустой → `DownloadFailed` | — | незнакомый → `DownloadFailed` (текст yt-dlp пользователю не уходит) | E `test_translate_error` (незнакомый, ffmpeg), `test_user_message_does_not_expose_ytdlp_text`; R `test_reader_error_text_empty_is_download_failed` ×3 |
+| `ytdlp.parse_probe` | `streams` | поля `None` | поля `None` | не список / элементы не словари → поля `None` (длительность из `format` сохраняется) | B `test_parse_probe`; R `test_reader_ffprobe_streams_odd_type_gives_empty_probe` ×5 |
+| `ytdlp.parse_probe` | `codec_type`, `width`, `height` | `None` | `None` | не `int` / `bool` / ≤ 0 → `None`; поток без `codec_type` — не видео | B `test_parse_probe`; R `test_reader_ffprobe_stream_without_codec_type_is_not_video` |
+| `ytdlp.parse_probe` | `side_data_list`, `rotation` | поворота нет | то же | не список / не словари / поворот не число → игнорируется | B `test_parse_probe[поворот 90°]`; R `test_reader_ffprobe_side_data_odd_type_is_ignored` ×5 |
+| `ytdlp.parse_probe` | `format.duration`, `stream.duration` | `None` | `None` | `"N/A"`, ≤ 0 → `None` | B `test_parse_probe` |
+| `ytdlp.probe_media` | код возврата и JSON ffprobe | — | — | код ≠ 0, не JSON, нет бинарника, тайм-аут → пустой `MediaProbe` с логом | B `test_probe_media_failure_gives_empty_probe` ×4 |
+| `ytdlp.cookie_names` | строки файла cookies (Netscape) | нет файла → пустое множество | — | пустые/комментарии/короткие строки/мусорные байты/каталог вместо файла → пропуск, без падения; `#HttpOnly_` учитывается | E `test_names_only_values_never_read`, `test_unreadable_cookies_gives_no_names`; R `test_reader_cookies_file_odd_lines_are_ignored`, `…file_empty…`, `…path_is_directory…` |
+
+**Находки аудита** (исправлено, тесты в `test_info_readers.py`; мутации — таблица зубов):
+1. `parse_probe` падал `TypeError` на `streams`/`side_data_list` не-списком (`5`) — теперь `_as_list`.
+2. `_size_marker`: гигантское число цифр в чужом URL давало `ValueError` в `int()` (лимит Python 4300
+   цифр) — регэксп ограничен 5 цифрами.
+3. `ShortsDownloader` при отсутствии `requested_downloads` трактовал «нет файла» как «пропущен по
+   `max_filesize`» и три раза повторял загрузку, в конце — `MediaTooLarge`; теперь неизвестный путь
+   — `DownloadFailed` без повторов.
+
+**Не покрыто аудитом** (не читается кодом части B, читают части C): поля Telegram `Update`
+(`message`, `text`, `caption`, `entities`), файлы в `data/`.
+
 _Часть B: читатели info dict yt-dlp; часть C: читатели Update._
 
 ## Положительный контроль gitleaks на настоящих секретах
@@ -516,6 +559,255 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 
 ## Зубы: часть B
 
+Мутации — по одной на прогон, на копии дерева в scratchpad (`UV_PROJECT_ENVIRONMENT` — окружение
+основного дерева); после прогона файл копии восстановлен из основного дерева.
+
+### `tg_bot/downloader/ytdlp.py` (`test_ytdlp_runner.py` 10, `test_ytdlp_errors.py` 25, `test_ytdlp_budget.py` 33)
+
+Мутации — скриптом на копии дерева (`mutate.sh`: одна строковая мутация, основное дерево не
+трогается; число изменённых строк проверяется). Тесты решения 8 — без реального yt-dlp и без
+sleep: функция ждёт `threading.Event`, тест ждёт состояния (поток стартовал, флаг выставлен,
+поток завершился); числа 0.05 — тайм-аут/порог параметром, 10 с — предохранитель.
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| R1 | **удалить каталог, не дожидаясь потока** (`DownloadTimeout` без `_join`) | `test_timeout_waits_for_thread_that_ignores_flag` (каталог жив, поток жив, запись в каталог), `test_semaphore_is_held_until_thread_finishes`, `test_timeout_interrupts_download_phase_by_itself`, `test_warning_when_thread_outlives_grace` |
+| R2 | **не выставлять флаг отмены** при тайм-ауте | `test_timeout_waits_for_thread_that_ignores_flag`, `test_semaphore_is_held_until_thread_finishes`, `test_timeout_interrupts_download_phase_by_itself` |
+| R3 | отпустить семафор при тайм-ауте, не дожидаясь потока | `test_semaphore_is_held_until_thread_finishes` (только он) |
+| R4 | пул по умолчанию вместо своего | `test_semaphore_is_held_until_thread_finishes`, `test_runner_uses_its_own_pool_not_default`, `test_default_pool_is_named_and_not_asyncio_default` |
+| R5 | `CancelledError` проглочен (`return None` вместо `raise`) | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread`, `test_cancelled_error_without_error_log_when_thread_stops_in_time` |
+| R6 | нет `WARNING` после порога | `test_warning_when_thread_outlives_grace` |
+| R7 | нет `ERROR` при остановке с живым потоком | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread` |
+| R8 | при `CancelledError` флаг не выставляется | оба `test_cancelled_error_*` |
+| R9 | ожидание при остановке без порога | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread` |
+| B1 | `size <= limit` → `<` | `test_exact_limit_passes_one_byte_more_does_not` |
+| B2 | неудачная попытка не удаляется | `test_oversize_attempt_is_removed_before_next_one` |
+| B3 | статус 429 не распознаётся | `test_translate_error[…RateLimited]` ×2 |
+| B4 | `session_lost` без «был до загрузки» | `test_no_session_before_means_not_lost` |
+| B5 | копия cookies с правами 644 | `test_copy_is_private_inside_workdir_and_source_untouched` |
+| B6 | «Failed to parse JSON» всегда `LoginRequired` | `test_translate_error[…DownloadFailed]`, `test_boundary_uses_session_lost_for_parse_json` |
+| B7 | граница ловит `Exception` | `test_boundary_passes_port_errors_cancel_and_own_bugs_unchanged` |
+| B8 | «файла нет» (yt-dlp пропустил по `max_filesize`) считается годным | `test_ytdlp_skipped_file_by_max_filesize_counts_as_too_large` |
+| B9 | поворот ffprobe не учитывается | `test_parse_probe[поворот 90°]` |
+| B11 | нет `socket_timeout` | `test_base_options_have_socket_timeout_hook_and_size_guard` |
+| B12 | хук не смотрит на флаг | `test_progress_hook_raises_only_when_flag_set`, `…_base_options_…` |
+| B13 | число уровня бюджета изменено | `test_budget_selector_table[0]` |
+| B16 | статус не ищется в `.cause` | `test_translate_error[ExtractorError…429]` |
+
+Различимость «пул по умолчанию» (R4): тест отличает его только потому, что `ThreadRunner` принимает
+`executor` (внедрение для тестов): задачи считаются на переданном пуле, плюс имя потока `ytdlp*` у
+пула по умолчанию. `max_workers` собственного пула тестом не проверяется (равен лимиту семафора по
+построению, отдельная мутация невозможна без чтения приватных полей `ThreadPoolExecutor`).
+
+**Проба `max_filesize`** (локальный сервер, файл 200 000 байт, `max_filesize=100000`): без
+исключения, **файла нет**, `requested_downloads` есть. Поэтому «файла нет» при заданном
+`max_filesize` трактуется как «слишком большой» (следующий уровень бюджета / `MediaTooLarge`).
+
+### `instagram.py` и `shorts.py` (`test_instagram_info.py` 54, `test_instagram_downloader.py` 27, `test_shorts_downloader.py` 17)
+
+Тесты разбора — на фикстурах `tests/fixtures/`; адаптеры — на фейковом `YoutubeDL`
+(`tests/fake_ytdlp.py`: пишет только в `outtmpl`, `max_filesize` молча пропускает файл, переписывает
+`cookiefile`). Решения реализации, которых не было в плане: описание Shorts — `description`, при
+пустом — `title`, иначе `""` (ТЗ 2.4: «название или описание, если доступно»); видео-элемент
+карусели больше лимита (или пропущенный по `max_filesize`) → `MediaTooLarge` на всю публикацию, а
+не тихая потеря элемента; несколько немаркированных вариантов фото — берётся последний.
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| I1 | пустой `formats` считается видео | `test_type_is_decided_by_response_not_by_link`, `test_classify_…[entry1-None]`, фото/карусель в `test_instagram_downloader` (6) |
+| I2 | первый немаркированный вместо последнего | `test_unmarked_beats_larger_marker_and_last_unmarked_wins` |
+| I3 | наименьший маркер вместо наибольшего | `test_without_unmarked_largest_marker_wins`, `test_largest_marker_by_area_not_by_position` ×3 |
+| I4 | немаркированный не в приоритете | `test_photo_original_is_the_unmarked_variant`, `…last_unmarked_wins`, `test_url_without_stp_…`, `test_photo_post_downloads_unmarked_original` |
+| I5 | `ignore_no_formats_error=False` | `test_options_follow_decisions` |
+| I6 | селектор Instagram изменён | `test_options_follow_decisions` (сравнение с литералом плана; с константой оно было тавтологией — исправлено) |
+| I7 | порог `<` → `<=` | `test_photo_with_exactly_min_short_side_has_no_warning` |
+| I8 | нет проверки короткой стороны | `test_small_photo_logs_warning_but_is_still_delivered` |
+| I9 | описание не берётся из элементов | `test_caption_from_top_level_and_from_entry` |
+| I10 | cookies не передаются yt-dlp | `test_ytdlp_gets_private_copy_source_is_untouched`, `test_parse_json_with_sessionid_removed_is_login_required` |
+| I11 | нет проверки факта размера видео | `test_video_over_limit_even_if_ytdlp_wrote_it_is_too_large` |
+| I12 | нет проверки «файла нет» (`max_filesize`) | `test_video_skipped_by_max_filesize_is_too_large` |
+| I13 | элементы в обратном порядке | `test_mixed_carousel_keeps_order_and_top_level_caption`, `test_unknown_entry_is_skipped_…` |
+| I14 | нет `NoMedia` | `test_nothing_usable_is_no_media` ×4 |
+| I15 | не-словари в `entries` не пропускаются | `test_non_dict_entries_are_skipped_with_log` |
+| I16 | маркер ищется во всём URL, а не в `stp` | `test_size_marker_is_read_only_from_stp_parameter` (**выжила на первой версии тестов** — тест добавлен) |
+| I17 | метаданные из info, а не из ffprobe | `test_metadata_comes_from_ffprobe_even_when_info_has_its_own` |
+| S1 | нет `merge_output_format` | `test_options_follow_decisions` |
+| S2 | нет `noplaylist` | `test_options_follow_decisions` |
+| S3 | `format_sort` изменён | `test_options_follow_decisions` |
+| S4 | нет запасного названия | `test_caption_description_then_title_then_empty` ×4 |
+| S5 | метаданные из ffprobe игнорируются | `test_one_video_item_with_metadata_and_caption` |
+| S6 | нет проверки «файла нет» | `test_fact_over_limit_retries_…`, `test_file_skipped_by_max_filesize_…`, `test_writes_only_inside_workdir` |
+| S7 | ошибки yt-dlp не переводятся | `test_unavailable_video_is_not_found` |
+| S8 | всегда первый уровень бюджета | `test_fact_over_limit_retries_with_next_budget_level` |
+
+Первые версии мутаций I9 и S8 были неверными (синтаксическая ошибка / `NameError` — тесты краснели
+не по делу); переписаны так, чтобы код оставался рабочим.
+
+### `tg_bot/routing.py` (`test_routing.py` 9) и `tests/fakes.py` (`test_fakes.py` 23, `test_downloader_contract.py` 14)
+
+`UnsupportedLink` — наследник `DownloadError` (с `user_message`): pipeline ловит и его одним `except`
+(в разделе 5 плана он был отдельным исключением; отклонение мелкое, отмечено в плане).
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| M1 | `KeyError` не переводится в `UnsupportedLink` | `test_platform_without_downloader_is_unsupported_not_keyerror`, `test_empty_registry_supports_nothing`, `test_registry_copies_mapping` |
+| M2 | реестр хранит исходный словарь, а не копию | `test_registry_copies_mapping` |
+| M3 | всегда загрузчик Instagram | `test_each_platform_goes_to_its_downloader` ×2 (YouTube), `…unsupported…`, `…copies_mapping` |
+| M4 | `UnsupportedLink` не `DownloadError` | `test_platform_without_downloader_is_unsupported_not_keyerror` |
+| M5 | (эквивалентная: `post` → Instagram — и так Instagram) | не падает, мутация отброшена |
+| F1 | фейк не бросает `NoMedia` на пустом | `test_empty_result_is_no_media`, контракт `no media-fake` |
+| F2 | нет лимита размера | `test_oversize_…` ×2, контракт `too large-fake` |
+| F3 | файлы пишутся в обратном порядке | `test_returns_items_in_order_inside_workdir` |
+| F4 | запись вне `workdir` | `test_returns_items_in_order_inside_workdir`, контракт `success-fake` ×2 |
+| F5 | нет проверки имени (путь вместо имени) | `test_writes_only_inside_workdir` ×5 |
+| F6 | принимает не-`DownloadError` | `test_only_port_errors_are_allowed` |
+| F7 | при отмене флаг не ставится | `test_cancellation_propagates_like_real_adapter` |
+| F8 | `gate` игнорируется | `test_gate_holds_download_until_released`, `test_cancellation_…` |
+| F9 | вместо `NoMedia` — `DownloadFailed` | `test_empty_result_is_no_media`, контракт `no media-fake` |
+
+**Сверка фейка с реализацией** (`test_downloader_contract.py`: один набор проверок для
+`FakeDownloader`, `InstagramDownloader` и `ShortsDownloader` на фейковом yt-dlp): успех (одно
+видео; фото + видео — исходный порядок, файлы только внутри `workdir`, непустой результат,
+`caption` — строка) и ошибки (`MediaNotFound`, `LoginRequired`, `MediaTooLarge`, `NoMedia` — **тот
+же тип** у каждой реализации, где сценарий возможен, `user_message` непуст, при ошибке записи
+вне `workdir` нет). Расхождения, которые контракт не скрывает и которые остаются: (1) фейк
+бросает ошибку **до** записи файлов, реальный адаптер может оставить в `workdir` копию cookies и
+частично скачанное — очистка каталога должна с этим справляться; (2) `DownloadTimeout` реальный
+адаптер получает от `ThreadRunner`, фейк — только если ему передать эту ошибку; (3) фейк не
+пропускает «неизвестные элементы» и не повторяет попытки по бюджету — это внутренности адаптеров.
+
+### Аудит читателей: мутации (`test_info_readers.py`, 34 теста)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| A1 | `streams` без защиты от не-списка | `test_reader_ffprobe_streams_odd_type_gives_empty_probe[5]` |
+| A2 | `side_data_list` без защиты | `test_reader_ffprobe_side_data_odd_type_is_ignored[5]` |
+| A3 | маркер `stp` — любое число цифр | `test_reader_thumbnail_stp_huge_digits_do_not_crash` |
+| A4 | Shorts: нет проверки «путь неизвестен» | `test_reader_requested_downloads_missing_in_shorts_is_download_failed_not_too_large` |
+| A7 | пропуск видео без пути не пишется в лог | `test_reader_process_result_without_filepath_skips_video_keeps_photo` ×4 |
+| A8 | фото без URL не пропускается | `test_reader_thumbnails_without_usable_url_skips_photo_with_log` ×5 |
+| A9 | строки cookies короче 7 полей читаются | `test_reader_cookies_file_odd_lines_are_ignored` |
+| A10 | cookies читаются без `errors="replace"` | `test_reader_cookies_file_odd_lines_are_ignored` |
+
+Цикл в цепочке причин (`_http_status`): мутация «убрать защиту `seen`» даёт бесконечный цикл —
+не запускалась (тест `…chain_with_cycle_does_not_hang` защищает именно от этого). Мутация
+«`status` строкой `"429"` считается лимитом» эквивалентна (`"429" == 429` ложно), отброшена.
+
+### `tests/test_scrub.py` (17 тестов зелёные)
+
+Находка при снятии фикстур (п. 3): у YouTube подпись, `ip` (IP машины) и `expire` лежат **в пути**
+URL (`…/expire/…/ip/…/sig/…`), без query; первая версия `scrub` смотрела только на query и их
+пропустила. Добавлена проверка сегментов пути + тест (мутация 5).
+
+Реализация: `stp` (маркер размера картинки, не секрет) сохраняется в заглушке —
+`<signed-url>?stp=…`: без него разбор фото (решение 6) не работает на очищенных фикстурах.
+Заглушкой заменяется любой строковый http(s)-URL с параметром подписи, а не только значения
+известных ключей (новое поле yt-dlp тоже будет очищено).
+
+| # | Мутация в `tests/scrub.py` | Упавшие тесты |
+|---|---|---|
+| 1 | `DROPPED_KEYS` без `http_headers` | `test_scrub_removes_cookies_and_headers_at_any_depth` |
+| 2 | списки не обходятся (`list(info)`) | `…removes_cookies_and_headers_at_any_depth`, `test_scrub_replaces_signed_urls`, `test_scrub_keeps_stp_size_marker` |
+| 3 | нет префикса `_nc_` | `test_scrub_signature_param_variants[…?_nc_sid=1]` |
+| 4 | `stp` не сохраняется (всегда `STUB`) | `test_scrub_keeps_stp_size_marker` |
+| 5 | подпись в пути URL не проверяется (`in_path = False`) | `test_scrub_replaces_urls_with_signature_in_path` |
+
+### Правки по ревью части B: зубы (2026-10-13)
+
+Мутации — скрипт на копии дерева (без `.git`, `.venv`, `data`, `.env`; окружение — основного
+дерева), по одной на прогон, `old` — ровно одно вхождение; subprocess с `timeout 20 с`; файл копии
+восстанавливается. Прогон по группам (номера — из ревью).
+
+**Группа 1 — секреты** (`test_smoke_helpers.py` 7, `test_config.py` 42 → 61, `test_info_readers.py`)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| S1 | `mkdtemp` без удаления вместо `TemporaryDirectory` (H1) | `test_private_dir_with_cookies_copy_is_gone_after_use`, `test_private_dir_is_removed_when_the_test_fails` |
+| S2 | `tmp_path_retention_policy = "all"` (H1) | `test_tmp_path_is_not_retained_after_tests` |
+| S3 | sha256 не зависит от содержимого (H2) | `test_sha256_changes_with_content_and_never_exposes_bytes` |
+| S4 | `sessionid` не портится | `test_broken_sessionid_replaces_only_that_value` |
+| S5 | теряется префикс `#HttpOnly_` | `test_broken_sessionid_replaces_only_that_value` |
+| S6 | без `sessionid` файл `broken.txt` остаётся | `test_broken_sessionid_without_session_leaves_no_file` |
+| K1 | число полей: `!=` → `<` (M4) | `…bad_format…[восемь полей]` |
+| K2 | число полей: `!=` → `>` | `…bad_format…` ×5 (6/1 поле, пробелы, CRLF) |
+| K3 | `fullmatch` → `match` для `expires` | `…[expires: цифры и буква]`, `…[expires — буквы]`-подобные (2) |
+| K4 | пустой `expires` допустим | `…[expires пуст]` |
+| K5 | нумерация строк с 0 | 11 строк таблицы (номер строки в ошибке) |
+| K6 | содержимое строки в тексте ошибки | 2 кейса (значение cookie в ошибке) |
+| K7 | комментарии проверяются как данные | 7 (номер строки, положительные контроли) |
+| K8 | `#HttpOnly_` не снимается (строка пропускается как комментарий) | `…[HttpOnly, expires]` |
+| K9 | проверка формата удалена | 12 (вся таблица) |
+| K10 | `cookie_names`: `== 7` → `>= 7` | `test_reader_cookies_file_odd_lines_are_ignored` |
+
+**Группа 2 — ThreadRunner** (`test_ytdlp_runner.py` 10 → 19, `test_info_readers.py` цикл ×3)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| T1 | ошибка порта из потока не приоритетна (M1) | `test_thread_error_after_timeout_wins_over_timeout` |
+| T2 | `DownloadTimeout from None` вместо причины потока | `test_other_thread_outcome_after_timeout_is_timeout_from_it` ×3 |
+| T3 | нет `WARNING` при ошибке потока после тайм-аута | `test_thread_error_after_timeout_wins_over_timeout` |
+| T4 | любой `TimeoutError` — тайм-аут (нет `expired()`) (L2) | `test_own_timeout_error_of_function_is_not_a_download_timeout` |
+| T5a | семафор не отпускается — после ошибки потока (L3) | `test_semaphore_is_released_after_thread_error` |
+| T5b | то же — после `CancelledError` | `test_semaphore_is_released_after_cancelled_error` |
+| T6 | нет done-callback (L4) | `test_thread_error_is_retrieved_even_when_run_no_longer_waits` |
+| T7a/b/c | нет `seen` в `_http_status`; цикл через `.cause` / `__cause__` / `exc_info` (L9) | по одному: `test_reader_error_chain_with_cycle_does_not_hang[…]` |
+
+Замечания по прогону. (1) T5 при первой версии тестов давал `TIMEOUT` прогона (вторая задача ждала
+семафор вечно): в тесты добавлен `asyncio.wait_for(…, 5)` — теперь утечка семафора — падение за 5 с.
+(2) **T7 — мутация цикла через subprocess с `timeout 20 с`: поймана.** Без `seen` вызов в
+`threading.Thread` не возвращается, `join(5)` истекает, `assert not worker.is_alive()` падает
+(поток-демон не держит процесс); все три варианта цикла — по одному прогону. Первый прогон всех
+трёх разом упёрся в тайм-аут 20 с (три ожидания по 5 с плюс вращающиеся потоки прежних
+параметров) — поэтому по одному.
+
+**Группа 3 — Instagram и Shorts** (`test_instagram_downloader.py` 27 → 38, `test_shorts_downloader.py` 17 → 19, `test_ytdlp_budget.py` 33 → 41, `test_instagram_info.py` 54 → 64, `test_port.py` +1)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| A1 | «ни один не удался» — не причина первого (M2) | 9, в т.ч. `test_nothing_succeeded_raises_error_of_first_element`, `test_all_over_limit_is_too_large` |
+| A2 | ошибка элемента не ловится поэлементно | 5, в т.ч. `test_one_of_three_over_limit_is_skipped_with_counter`, `test_failed_photo_is_skipped_video_is_delivered` |
+| A3 | `skipped=0` в результате | 4, в т.ч. `test_one_of_three_over_limit_is_skipped_with_counter` |
+| A4 | файл сверх лимита не удаляется | `test_over_limit_file_written_by_ytdlp_is_removed` |
+| A5 | причина последнего вместо первого | `test_nothing_succeeded_raises_error_of_first_element`, `test_size_message_of_previous_element_does_not_leak_to_next` |
+| A6 | повтор загрузки видео Instagram (M3) | `test_oversize_video_is_not_retried_with_lower_budget` (+2) |
+| A7 | Instagram: «файла нет» всегда «слишком большой» (точка 2) | `test_missing_file_without_size_message_is_download_failed` (+1) |
+| A9 | Shorts: «файла нет» всегда «слишком большой» | `test_missing_file_without_size_message_is_download_failed_not_retry` |
+| A10 | другой текст сообщения yt-dlp | 10 (адаптеры и `test_logger_flags_…`) |
+| A11 | размер из сообщения не в логе | 3 (`…size_is_logged`, `test_size_message_is_logged_with_numbers`, `test_logger_flags_…`) |
+| A12 | флаг не сбрасывается при чтении | `test_logger_flags_max_filesize_message_once_and_logs_sizes` |
+| L1 | `width/height` не используются (L10) | 3 (`test_dimensions_*`, `test_thumbnails_without_dimensions_…`) |
+| L2 | при равных размерах — первая | `test_equal_dimensions_last_wins` |
+| L3 | `bool` принят за размер | `test_unusable_dimensions_fall_back_to_stp_rule[True-800]` |
+| L4 | наименьшая площадь вместо наибольшей | 2 (`test_dimensions_decide_…`, `test_dimensions_beat_stp_…`) |
+| P1 | отрицательный `skipped` допустим | `test_result_skipped_defaults_to_zero_and_is_not_negative` |
+
+Выжившие и исправленные. **A8** (сброс флага перед элементом Instagram) — мутация выжила: флаг
+потребляется на самом элементе (`take_size_exceeded` при «файла нет»), устаревший флаг недостижим;
+защитная строка удалена, а не оставлена без теста. **L3** при первой версии теста выжила: у обоих
+вариантов был одинаковый «размер» `True×800`, ничья решалась «последним»; тест переписан (непригодные
+поля — у одного варианта, у второго их нет), теперь убивается.
+
+**Группа 4 — тесты и CI** (`test_ffmpeg_gate.py` 10, `tests/smoke/conftest.py`)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| F1 | `REQUIRE_FFMPEG` игнорируется (M5) | `test_missing_ffmpeg_fails_when_required`, `test_only_one_of_two_tools_is_not_enough` ×2 |
+| F2 | проверяется только `ffmpeg` | `test_only_one_of_two_tools_is_not_enough[ffprobe]` |
+| F3 | любое непустое значение включает требование | `test_only_exact_one_requires_ffmpeg[true/yes/0]` |
+| F4 | нет ffmpeg — всегда fail | 5 (в т.ч. `test_missing_ffmpeg_skips_by_default`) |
+| C1 | удалён `tests/smoke/conftest.py` (L8) | временный файл в `tests/smoke/` без `pytestmark` падает в обычном прогоне (1 failed); с conftest — `13 deselected`, зелёный (вручную; файл не коммитился) |
+| C2 | убран `--strict-markers` (L8) | тест с `@pytest.mark.smok`: со strict — ошибка сбора; без — «1 passed, 1 warning» (вручную) |
+| C3 | реальный ffprobe без ffmpeg в PATH (M5) | `REQUIRE_FFMPEG=1` → `1 failed`; без переменной → `1 skipped` с причиной в итоге (`-rs`) |
+
+Первая версия тестов `test_ffmpeg_gate.py` (`pytest.raises(Failed)`) не ловила F1: `Skipped`
+вылетал из `pytest.raises` и тест помечался «пропущенным», а не упавшим; переписаны через функцию
+`outcome()`, возвращающую `fail/skip/pass`. **L6:** тест фейка `test_cancellation_propagates_like_real_adapter`
+переименован в `test_cancellation_while_gated_propagates_and_fake_writes_nothing` — он проверяет
+только то, что делает фейк (реальный адаптер при отмене может оставить `cookies.txt` и частичные
+файлы; различие уже записано в docstring `tests/fakes.py`). Дотягивать фейк до записи `cookies.txt`
+не стал: тест очистки каталога с чужими файлами — забота `pipeline` (часть C), у него и будет
+положительный контроль на реальном адаптере.
+
 ## Зубы: часть C
 
 ## Итог части A
@@ -538,5 +830,82 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 | 4 | финальный (после отката контроля L3) | lint, hooks, test, gitleaks — зелёные |
 
 ## Итог части B
+
+### Проба: progress-hook на фазе извлечения (риск раздела 8; 2026-10-13, до п. 5)
+
+Локальный HTTP-сервер (без внешней сети), yt-dlp 2026.08.19, `socket_timeout=3`, `retries=0`,
+хук считает вызовы и по флагу поднимает исключение (как в решении 8). Скрипт — scratchpad.
+
+| Сценарий | Результат |
+|---|---|
+| Сервер молчит на HEAD/GET (фаза извлечения, generic) | **0 вызовов хука**; `DownloadError … Read timed out` через 3.3 с — оборвал только `socket_timeout` |
+| Сервер отдаёт файл кусками (фаза загрузки), без отмены | 10 вызовов хука, файл скачан |
+| То же, исключение из хука после 3-го вызова | загрузка прервана через 0.4 с, исключение дошло наружу |
+
+**Результаты работы части B** (2026-10-13)
+
+Дымовые тесты (`uv run pytest -m smoke`, Mac/VPN, без cookies; запускал агент), 8 из 8:
+
+| Тест | Время |
+|---|---|
+| Shorts 135 с (`ZoAPORyKG4A`): ≤ 52 428 800 байт, H.264 + AAC, вертикальное, 135 ± 3 с, подпись есть | 4.6 с |
+| Shorts `18NGQq7p3LY`: H.264, метаданные | 3.0 с |
+| Shorts недоступный → `MediaNotFound` | 0.7 с |
+| Reel `DeRrI8_BTZz`: 1 видео, H.264 + AAC, 720×1280, 73 ± 2 с | 3.7 с |
+| `/p/DeRrI8_BTZz` → тот же одиночный видеоэлемент | 4.3 с |
+| Пост-фото `DdjcJv8Auv4`: оригинал, короткая сторона ≥ 600 | 3.0 с |
+| Смешанная карусель `DeEjFYODJXW`: фото, затем видео, подпись | 3.1 с |
+| Пост `BkfuX9UB-eK` без входа → `LoginRequired` | 1.8 с |
+
+**Один сбой при первом прогоне:** длинный Shorts — `DownloadFailed: unable to download video data:
+HTTP Error 403: Forbidden` (YouTube); два повтора подряд и общий прогон — зелёные. Причина не
+выяснена (единичный 403 сети/VPN или YouTube); повторов на 403 в адаптере нет. Следить на VPS.
+
+`TestWithCookies` (Reel и `/p/`, пост-фото и карусель с cookies, неизменность исходного файла
+cookies, испорченный `sessionid` → `LoginRequired`) агент не запускал — нужны cookies владельца
+(`IG_COOKIES_FILE`). **Прогон владельца** (после правок ревью — каталоги в `private_dir()`, sha256
+вместо сравнения байт): **4 passed, 5 deselected, 12.61 с** (Mac, VPN).
+
+Вывод пробы хука: хук прерывает **загрузку**, но не **извлечение** — флаг отмены на фазе извлечения не
+проверяется, поток живёт до конца извлечения (у Instagram/YouTube — несколько запросов, каждый
+ограничен `socket_timeout`, суммарно не ограничено). Работа была остановлена по условию задачи
+(«хук не вызывается на фазе извлечения — стоп и отчёт»); владелец принял вариант «ждать поток»
+(решение 8, «изменено в части B»), п. 5–9 выполнены после этого.
+
+**Отклонения от плана, внесённые в план («изменено в части B»):** решение 8 (ждать поток, свой пул,
+семафор в `ThreadRunner`, порог, отвергнутые B и C); решение 20a / `scrub` (`stp` сохраняется,
+подпись в пути URL, любой URL с параметром подписи); `UnsupportedLink` — наследник `DownloadError`;
+риск «поток yt-dlp не прерывается» подтверждён пробой. Без отражения в плане (детали реализации,
+в notes) при первой записи были: описание Shorts = `description`, иначе `title`; видео-элемент
+карусели сверх лимита → `MediaTooLarge` на всю публикацию; «файла нет при заданном `max_filesize`»
+= «слишком большой». **Все три пересмотрены и внесены в план по ревью части B** (решения 12, 6 и 9
+соответственно; второе и третье изменены по существу).
+
+**Изменено по ревью части B** (каждое — в плане с пометкой «изменено по ревью части B»; зубы — выше,
+«Правки по ревью части B: зубы»): решение 8, п. 4 (после тайм-аута выбрасывается `DownloadError`
+потока, `expired()`, done-callback; `stop_grace_period` в разделе «Дальше»); решение 6 (выбор по
+`width/height`, пропуск элементов карусели, `DownloadResult.skipped`); решение 9 (Instagram без
+повтора по бюджету и почему, цена повтора Shorts, правило «файла нет» по сообщению yt-dlp);
+решение 12 (источник подписи); решение 16 (формат файла cookies при старте); решение 19 (ffmpeg и
+`REQUIRE_FFMPEG` в CI); решение 20 (каталог cookies в дымовых тестах, `tmp_path_retention_policy`,
+маркер на каталог, `--strict-markers`); раздел 4 (семафор в `ThreadRunner`, один общий раннер,
+ожидание семафора вне тайм-аута). **Для части C записано в план:** пометка «не удалось N из M» при
+`skipped > 0`; проверка ffmpeg/ffprobe при старте бота; создание одного общего `ThreadRunner`.
+Вне плана: L5 — докстринги `cookie_names` и `describe` приведены к факту (что читается в память;
+«нет значений cookies в тексте yt-dlp» — допущение, пробой не проверено); CLAUDE.md — блокирующее
+через `ThreadRunner`, а не `asyncio.to_thread`.
+
+**Прогоны CI в PR #3** (2026-10-13, `ubuntu-latest`):
+
+| # | Что | Результат |
+|---|---|---|
+| 1 | головной коммит PR (с установкой ffmpeg и `REQUIRE_FFMPEG=1`) | lint, hooks, test (43 с), gitleaks — зелёные |
+| 2 | контроль M5: коммит без установки ffmpeg | **test красный**: `REQUIRE_FFMPEG=1, но нет в PATH: ffmpeg, ffprobe`, `1 failed, 470 passed, 12 deselected` — упал тест с реальным ffprobe (не пропущен); lint, hooks, gitleaks зелёные |
+| 3 | `git revert` контроля | lint, hooks, test, gitleaks — зелёные |
+
+**Проба текста `max_filesize`** (2026-10-13, yt-dlp 2026.08.19, локальный сервер, файл 200 000
+байт): при `max_filesize=100000` — файла нет, исключения нет, в `logger.debug` одна строка
+`\r[download] File is larger than max-filesize (200000 bytes > 100000 bytes). Aborting.`; при
+`max_filesize=1000000` файл скачан. Основание правила «файла нет без сообщения — `DownloadFailed`».
 
 ## Итог части C

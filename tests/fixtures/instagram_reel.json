@@ -1,0 +1,43 @@
+{
+ "channel": "user",
+ "comment_count": 405,
+ "description": "Угорели по искусству? #наполеоны #рилс #сибиряки",
+ "duration": null,
+ "extractor": "Instagram",
+ "extractor_key": "Instagram",
+ "formats": [
+  {"url": "<signed-url>"},
+  {"url": "<signed-url>"},
+  {"url": "<signed-url>"},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962341818687v", "format_note": "DASH video", "fps": null, "height": 960, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 126.568, "url": "<signed-url>", "vcodec": "vp09.00.30.08.00.01.01.01.00", "width": 540},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962345152020v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 180.454, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962331818688v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 225.305, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962348485353v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 306.877, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962328485355v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 412.236, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962335152021v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 576.244, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962351818686v", "format_note": "DASH video", "fps": null, "height": 1280, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 732.868, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "none", "asr": null, "container": "mp4_dash", "dynamic_range": null, "ext": "mp4", "filesize": null, "format_id": "dash-1928962338485354v", "format_note": "DASH video", "fps": null, "height": 1920, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 1024.985, "url": "<signed-url>", "vcodec": "vp09.00.40.08.00.01.01.01.00", "width": 1080},
+  {"acodec": "mp4a.40.5", "asr": 44100, "container": "m4a_dash", "dynamic_range": null, "ext": "m4a", "filesize": null, "format_id": "dash-1928918978489690a", "format_note": "DASH audio", "fps": null, "height": null, "is_dash_periods": true, "language": null, "manifest_stream_number": 0, "manifest_url": null, "tbr": 50.354, "url": "<signed-url>", "vcodec": "none", "width": null}
+ ],
+ "id": "DeRrI8_BTZz",
+ "like_count": 18766,
+ "original_url": "https://www.instagram.com/reel/DeRrI8_BTZz/",
+ "thumbnails": [
+  {"height": 150, "url": "<signed-url>?stp=c0.248.640.640a_dst-jpg_e15_s150x150_tt6", "width": 150},
+  {"height": 240, "url": "<signed-url>?stp=c0.248.640.640a_dst-jpg_e15_s240x240_tt6", "width": 240},
+  {"height": 320, "url": "<signed-url>?stp=c0.248.640.640a_dst-jpg_e15_s320x320_tt6", "width": 320},
+  {"height": 480, "url": "<signed-url>?stp=c0.248.640.640a_dst-jpg_e15_s480x480_tt6", "width": 480},
+  {"height": 640, "url": "<signed-url>?stp=c0.248.640.640a_dst-jpg_e15_s640x639_tt6", "width": 640},
+  {"height": 426, "url": "<signed-url>?stp=dst-jpg_e15_p240x240_tt6", "width": 240},
+  {"height": 568, "url": "<signed-url>?stp=dst-jpg_e15_p320x320_tt6", "width": 320},
+  {"height": 852, "url": "<signed-url>?stp=dst-jpg_e15_p480x480_tt6", "width": 480},
+  {"height": 1136, "url": "<signed-url>?stp=dst-jpg_e15_tt6", "width": 640}
+ ],
+ "timestamp": 1791554407,
+ "title": "Video by user",
+ "uploader": "user",
+ "uploader_id": "user",
+ "webpage_url": "https://www.instagram.com/reel/DeRrI8_BTZz/",
+ "webpage_url_basename": "DeRrI8_BTZz",
+ "webpage_url_domain": "instagram.com"
+}
