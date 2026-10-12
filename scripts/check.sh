@@ -1,6 +1,6 @@
 #!/bin/bash
-# Проверки проекта: секции lint (ruff format --check, ruff check), hooks (scripts/test-hooks.sh)
-# и test (pytest).
+# Проверки проекта: секции lint (ruff format --check, ruff check), hooks (scripts/test-hooks.sh и
+# scripts/test-git-hooks.sh) и test (pytest).
 #
 #   scripts/check.sh                          все секции
 #   scripts/check.sh --only lint|hooks|test   одна секция
@@ -145,7 +145,12 @@ section() {
 }
 
 lint_section() { lint "$1"; }
-hooks_section() { run "$1" scripts/test-hooks.sh; }
+hooks_section() {
+    local rc=0
+    run "$1" scripts/test-hooks.sh || rc=1
+    run "$1" scripts/test-git-hooks.sh || rc=1
+    return "$rc"
+}
 test_section() { pytest_run "$1"; }
 single_section() { pytest_run "$1" -v "$single"; }
 

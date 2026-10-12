@@ -1,0 +1,32 @@
+# Правила gitleaks (решение 18 плана этапа 1). Встроенные правила остаются, свои — поверх:
+# встроенное правило Telegram требует рядом слово «telegr», а cookies Instagram не ловят вовсе.
+title = "tg-bot"
+
+[extend]
+useDefault = true
+
+# Токен бота: современный (ID 8–10 цифр, вторая часть начинается с AA, 35 символов) и старый
+# (ID короче, вторая часть не с AA) — один широкий шаблон на оба формата.
+[[rules]]
+id = "telegram-bot-token-wide"
+description = "Токен Telegram-бота (оба формата)"
+regex = '''\b\d{5,12}:[0-9A-Za-z_-]{30,40}\b'''
+keywords = [":"]
+
+# cookies Instagram в формате Netscape (файл для yt-dlp): строка домена с именем sessionid.
+[[rules]]
+id = "instagram-cookies-netscape"
+description = "Строка Netscape с cookie sessionid для instagram.com"
+# Секрет — только значение (группа 1): с секретом «вся строка» встроенный allowlist при
+# useDefault отбрасывал находку (проверено), и в выводе редактируется одно значение.
+regex = '''instagram\.com\t(?:TRUE|FALSE)\t\S*\t(?:TRUE|FALSE)\t\d+\tsessionid\t(\S+)'''
+secretGroup = 1
+keywords = ["sessionid"]
+
+# cookies Instagram в виде заголовка или строки cookies.
+[[rules]]
+id = "instagram-sessionid-pair"
+description = "Пара sessionid=значение"
+regex = '''\bsessionid=([^;\s"']{8,})'''
+secretGroup = 1
+keywords = ["sessionid"]
