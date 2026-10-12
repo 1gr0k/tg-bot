@@ -1,0 +1,86 @@
+"""Порт загрузчика: интерфейс, структуры результата, иерархия ошибок (решение 4, раздел 5 плана).
+
+Без типов yt-dlp и aiogram: остальной код зависит только от этого модуля. Временный каталог
+принадлежит вызывающему (решение 3): загрузчик пишет только внутрь переданного `workdir`.
+"""
+
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import Path
+from typing import ClassVar, Protocol
+
+from tg_bot.links import Link
+
+
+class MediaKind(StrEnum):
+    PHOTO = "photo"
+    VIDEO = "video"
+
+
+@dataclass(frozen=True, slots=True)
+class MediaItem:
+    kind: MediaKind
+    path: Path  # внутри workdir
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None  # секунды, для видео
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadResult:
+    items: tuple[MediaItem, ...]  # исходный порядок, не пусто
+    caption: str = ""  # "" — описания нет
+
+    def __post_init__(self) -> None:
+        if not self.items:
+            raise ValueError("DownloadResult: items не может быть пустым")
+
+
+class DownloadError(Exception):
+    """Базовая ошибка загрузки.
+
+    `user_message` — короткий текст пользователю (без текста yt-dlp); `str(error)` — причина для
+    лога (без значений cookies и токенов).
+    """
+
+    user_message: ClassVar[str] = "Скачать не удалось."
+
+
+class MediaNotFound(DownloadError):
+    """Удалено или не существует."""
+
+    user_message = "Публикация не найдена: возможно, она удалена."
+
+
+class LoginRequired(DownloadError):
+    """Нужен вход или cookies отвергнуты (без cookies «удалено» и «нужен вход» не различить)."""
+
+    user_message = "Публикация недоступна без входа или удалена."
+
+
+class RateLimited(DownloadError):
+    user_message = "Слишком много запросов, попробуйте позже."
+
+
+class MediaTooLarge(DownloadError):
+    user_message = "Файл слишком большой для отправки в Telegram."
+
+
+class DownloadTimeout(DownloadError):
+    user_message = "Загрузка заняла слишком много времени."
+
+
+class NoMedia(DownloadError):
+    """Публикация без поддерживаемых медиа."""
+
+    user_message = "Поддерживаемых медиа в публикации нет."
+
+
+class DownloadFailed(DownloadError):
+    """Прочее, в том числе ошибка FFmpeg и незнакомая ошибка yt-dlp."""
+
+    user_message = "Скачать не удалось."
+
+
+class Downloader(Protocol):
+    async def download(self, link: Link, workdir: Path) -> DownloadResult: ...
