@@ -46,7 +46,8 @@ FORMAT_SELECTOR = "b[format_id!*=dash]/bv*[vcodec^=avc1]+ba/bv*+ba/b"
 # Решение 6: короткая сторона скачанного фото меньше — взят не оригинал → WARNING.
 MIN_PHOTO_SIDE = 600
 
-_SIZE_MARKER = re.compile(r"(?:^|_)[ps](\d+)x(\d+)(?:_|$)")
+# Не больше 5 цифр: гигантское число в чужом URL не должно ронять `int()`.
+_SIZE_MARKER = re.compile(r"(?:^|_)[ps](\d{1,5})x(\d{1,5})(?:_|$)")
 _PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 
 type YdlFactory = Callable[[dict[str, Any]], AbstractContextManager[Any]]

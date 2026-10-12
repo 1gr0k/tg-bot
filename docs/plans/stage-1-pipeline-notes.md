@@ -328,6 +328,49 @@ getUpdates: получено 100 (offset не сдвигался, апдейты
 
 ## Аудит читателей
 
+Часть B (2026-10-13): читатели внешних данных — info dict yt-dlp, объекты ошибок yt-dlp, вывод
+ffprobe, файл cookies. Метод: перечислены все места кода, читающие чужие ключи; для каждого — что
+при отсутствии, `None`, незнакомом значении. Ожидание: пропуск с записью в лог либо понятная ошибка
+порта; остальные элементы публикации не теряются. Аудит нашёл три дыры (исправлены вместе с
+тестами, п. «Находки»).
+
+Тесты ниже: `I` — `test_instagram_info.py`, `D` — `test_instagram_downloader.py`, `S` —
+`test_shorts_downloader.py`, `R` — `test_info_readers.py`, `E` — `test_ytdlp_errors.py`, `B` —
+`test_ytdlp_budget.py`.
+
+| Читатель | Ключ | Нет ключа | `None` | Незнакомое значение | Тесты |
+|---|---|---|---|---|---|
+| `instagram.entries_of` | сам `info` | `NoMedia` | `NoMedia` | не словарь → предупреждение, нет элементов → `NoMedia` | I `test_info_not_a_dict_gives_no_entries`; D `test_nothing_usable_is_no_media` |
+| `instagram.entries_of` | `entries` | одиночная публикация | одиночная | не список → одиночная; пустой список → `NoMedia`; не-словари внутри → пропуск с логом, остальные целы | I `test_entries_not_a_list_means_single_publication`, `test_non_dict_entries_are_skipped_with_log`, `test_empty_entries_list_gives_no_entries` |
+| `instagram.classify` | `formats` | фото (если есть `thumbnails`), иначе пропуск | то же | не список → как нет; непустой → видео | I `test_classify_tolerates_missing_and_odd_values` |
+| `instagram.classify` / `pick_photo_url` | `thumbnails` | пропуск элемента с логом «ни форматов, ни превью» | то же | не список → `None`; элементы не словари → пропускаются | I `test_pick_photo_url_tolerates_garbage`, `…skips_bad_items_but_keeps_good_ones`; D `test_unknown_entry_is_skipped_but_rest_is_delivered` |
+| `instagram.pick_photo_url` | `thumbnails[].url` | вариант пропущен | вариант пропущен | не строка/пустая → пропущен; все негодные → фото пропущено с логом, остальные элементы целы | I `test_pick_photo_url_tolerates_garbage`; R `test_reader_thumbnails_without_usable_url_skips_photo_with_log` ×5 |
+| `instagram._size_marker` | параметр `stp` в URL | вариант «без маркера» (оригинал) | — | нет маркера → оригинал; маркер только из `stp`, не из пути/других параметров; гигантские цифры → не маркер, без `ValueError` | I `test_url_without_stp_counts_as_unmarked`, `test_size_marker_is_read_only_from_stp_parameter`; R `test_reader_thumbnail_stp_huge_digits_do_not_crash` |
+| `instagram.caption_of` | `description` (верх, затем элементы) | `""` | `""` | не строка / пробелы → `""`; берётся первый непустой | I `test_caption_missing_or_odd_is_empty_string`, `test_caption_from_top_level_and_from_entry` |
+| `shorts.caption_of` | `description`, затем `title` | `title`, иначе `""` | то же | не строка/пробелы → следующий, иначе `""` | S `test_caption_description_then_title_then_empty` |
+| `instagram.downloaded_path` (и Shorts) | `requested_downloads[].filepath` | путь неизвестен → `None` | `None` | не список / элементы не словари / `filepath` не строка или пустой → `None` | I `test_downloaded_path` |
+| `InstagramDownloader._fetch_video` | результат `process_ie_result` | видео пропущено с логом, остальное цело; единственное → `NoMedia` | то же | не словарь → то же; путь есть, файла нет → `MediaTooLarge` (проба `max_filesize`) | R `test_reader_process_result_without_filepath_skips_video_keeps_photo` ×4, `…for_only_video_is_no_media`; D `test_video_skipped_by_max_filesize_is_too_large` |
+| `ShortsDownloader` | `requested_downloads` | `DownloadFailed` без повторов бюджета (не «слишком большой»); путь есть, файла нет → следующий уровень | то же | — | R `test_reader_requested_downloads_missing_in_shorts_is_download_failed_not_too_large`; S `test_file_skipped_by_max_filesize_counts_as_too_large` |
+| `ytdlp._http_status` | `status`, `exc_info`, `cause`, `__cause__` | не 429 → общая ошибка | то же | не `int` → не лимит; цепочка с циклом не зависает | E `test_translate_error[…429]`, `test_translate_error[…]` (cause); R `test_reader_error_status_not_an_int_is_not_rate_limit` ×4, `test_reader_error_chain_with_cycle_does_not_hang` |
+| `ytdlp.translate_error` | текст ошибки | пустой → `DownloadFailed` | — | незнакомый → `DownloadFailed` (текст yt-dlp пользователю не уходит) | E `test_translate_error` (незнакомый, ffmpeg), `test_user_message_does_not_expose_ytdlp_text`; R `test_reader_error_text_empty_is_download_failed` ×3 |
+| `ytdlp.parse_probe` | `streams` | поля `None` | поля `None` | не список / элементы не словари → поля `None` (длительность из `format` сохраняется) | B `test_parse_probe`; R `test_reader_ffprobe_streams_odd_type_gives_empty_probe` ×5 |
+| `ytdlp.parse_probe` | `codec_type`, `width`, `height` | `None` | `None` | не `int` / `bool` / ≤ 0 → `None`; поток без `codec_type` — не видео | B `test_parse_probe`; R `test_reader_ffprobe_stream_without_codec_type_is_not_video` |
+| `ytdlp.parse_probe` | `side_data_list`, `rotation` | поворота нет | то же | не список / не словари / поворот не число → игнорируется | B `test_parse_probe[поворот 90°]`; R `test_reader_ffprobe_side_data_odd_type_is_ignored` ×5 |
+| `ytdlp.parse_probe` | `format.duration`, `stream.duration` | `None` | `None` | `"N/A"`, ≤ 0 → `None` | B `test_parse_probe` |
+| `ytdlp.probe_media` | код возврата и JSON ffprobe | — | — | код ≠ 0, не JSON, нет бинарника, тайм-аут → пустой `MediaProbe` с логом | B `test_probe_media_failure_gives_empty_probe` ×4 |
+| `ytdlp.cookie_names` | строки файла cookies (Netscape) | нет файла → пустое множество | — | пустые/комментарии/короткие строки/мусорные байты/каталог вместо файла → пропуск, без падения; `#HttpOnly_` учитывается | E `test_names_only_values_never_read`, `test_unreadable_cookies_gives_no_names`; R `test_reader_cookies_file_odd_lines_are_ignored`, `…file_empty…`, `…path_is_directory…` |
+
+**Находки аудита** (исправлено, тесты в `test_info_readers.py`; мутации — таблица зубов):
+1. `parse_probe` падал `TypeError` на `streams`/`side_data_list` не-списком (`5`) — теперь `_as_list`.
+2. `_size_marker`: гигантское число цифр в чужом URL давало `ValueError` в `int()` (лимит Python 4300
+   цифр) — регэксп ограничен 5 цифрами.
+3. `ShortsDownloader` при отсутствии `requested_downloads` трактовал «нет файла» как «пропущен по
+   `max_filesize`» и три раза повторял загрузку, в конце — `MediaTooLarge`; теперь неизвестный путь
+   — `DownloadFailed` без повторов.
+
+**Не покрыто аудитом** (не читается кодом части B, читают части C): поля Telegram `Update`
+(`message`, `text`, `caption`, `entities`), файлы в `data/`.
+
 _Часть B: читатели info dict yt-dlp; часть C: читатели Update._
 
 ## Положительный контроль gitleaks на настоящих секретах
@@ -632,6 +675,23 @@ sleep: функция ждёт `threading.Event`, тест ждёт состоя
 частично скачанное — очистка каталога должна с этим справляться; (2) `DownloadTimeout` реальный
 адаптер получает от `ThreadRunner`, фейк — только если ему передать эту ошибку; (3) фейк не
 пропускает «неизвестные элементы» и не повторяет попытки по бюджету — это внутренности адаптеров.
+
+### Аудит читателей: мутации (`test_info_readers.py`, 34 теста)
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| A1 | `streams` без защиты от не-списка | `test_reader_ffprobe_streams_odd_type_gives_empty_probe[5]` |
+| A2 | `side_data_list` без защиты | `test_reader_ffprobe_side_data_odd_type_is_ignored[5]` |
+| A3 | маркер `stp` — любое число цифр | `test_reader_thumbnail_stp_huge_digits_do_not_crash` |
+| A4 | Shorts: нет проверки «путь неизвестен» | `test_reader_requested_downloads_missing_in_shorts_is_download_failed_not_too_large` |
+| A7 | пропуск видео без пути не пишется в лог | `test_reader_process_result_without_filepath_skips_video_keeps_photo` ×4 |
+| A8 | фото без URL не пропускается | `test_reader_thumbnails_without_usable_url_skips_photo_with_log` ×5 |
+| A9 | строки cookies короче 7 полей читаются | `test_reader_cookies_file_odd_lines_are_ignored` |
+| A10 | cookies читаются без `errors="replace"` | `test_reader_cookies_file_odd_lines_are_ignored` |
+
+Цикл в цепочке причин (`_http_status`): мутация «убрать защиту `seen`» даёт бесконечный цикл —
+не запускалась (тест `…chain_with_cycle_does_not_hang` защищает именно от этого). Мутация
+«`status` строкой `"429"` считается лимитом» эквивалентна (`"429" == 429` ложно), отброшена.
 
 ### `tests/test_scrub.py` (17 тестов зелёные)
 

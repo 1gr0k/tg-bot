@@ -15,7 +15,7 @@ from typing import Any
 import yt_dlp
 
 from tg_bot.downloader.instagram import Probe, YdlFactory, downloaded_path
-from tg_bot.downloader.port import DownloadResult, MediaItem, MediaKind
+from tg_bot.downloader.port import DownloadFailed, DownloadResult, MediaItem, MediaKind
 from tg_bot.downloader.ytdlp import (
     Budget,
     ThreadRunner,
@@ -76,7 +76,9 @@ class ShortsDownloader:
                 info = ydl.extract_info(link.url, download=True)
             infos.append(info)
             path = downloaded_path(info)
-            return path if path is not None and path.exists() else None
+            if path is None:  # неизвестный путь — не «слишком большой»
+                raise DownloadFailed("yt-dlp не вернул путь скачанного файла")
+            return path if path.exists() else None  # нет файла = пропущен по `max_filesize`
 
         with translating_errors():
             path = fit_budget(attempt, workdir, cancel)

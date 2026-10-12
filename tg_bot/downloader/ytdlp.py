@@ -348,6 +348,10 @@ class MediaProbe:
     duration: float | None
 
 
+def _as_list(value: object) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def _positive_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
@@ -364,12 +368,12 @@ def parse_probe(data: object) -> MediaProbe:
     """Разбор вывода `ffprobe -print_format json`; незнакомое и `None` → поля `None`."""
     if not isinstance(data, dict):
         return MediaProbe(None, None, None)
-    streams = [s for s in data.get("streams") or [] if isinstance(s, dict)]
+    streams = [s for s in _as_list(data.get("streams")) if isinstance(s, dict)]
     video = next((s for s in streams if s.get("codec_type") == "video"), {})
     width, height = _positive_int(video.get("width")), _positive_int(video.get("height"))
     rotations = [
         r.get("rotation")
-        for r in video.get("side_data_list") or []
+        for r in _as_list(video.get("side_data_list"))
         if isinstance(r, dict) and "rotation" in r
     ]
     if rotations and isinstance(rotations[0], int | float) and abs(rotations[0]) % 180 == 90:
