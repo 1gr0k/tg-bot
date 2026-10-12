@@ -212,7 +212,12 @@ SESSION_COOKIE = "sessionid"
 
 
 def cookie_names(path: Path) -> set[str]:
-    """Имена cookies из файла Netscape; значения не читаются (ни в память, ни в лог)."""
+    """Имена cookies из файла Netscape.
+
+    Файл читается построчно: строки со значениями на время разбора попадают в память, но в
+    результат, лог и исключения идут только имена. Строка — ровно 7 полей (как проверяет
+    `config`); остальные пропускаются.
+    """
     names: set[str] = set()
     try:
         with path.open(encoding="utf-8", errors="replace") as fh:
@@ -221,7 +226,7 @@ def cookie_names(path: Path) -> set[str]:
                 if line.startswith("#"):
                     continue
                 fields = line.split("\t")
-                if len(fields) >= 7:
+                if len(fields) == 7:
                     names.add(fields[5])
     except OSError as exc:
         log.warning("не удалось прочитать cookies: %s", type(exc).__name__)

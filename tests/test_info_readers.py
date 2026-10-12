@@ -177,11 +177,14 @@ def test_reader_ffprobe_stream_without_codec_type_is_not_video():
 def test_reader_cookies_file_odd_lines_are_ignored(tmp_path):
     good = "\t".join([".instagram.com", "TRUE", "/", "TRUE", "1", "csrftoken", "v"])
     path = tmp_path / "c.txt"
+    eight = "\t".join([".instagram.com", "TRUE", "/", "TRUE", "1", "eighth", "v", "extra"])
     path.write_bytes(
-        "\n".join(["", "# comment", "   ", "short\tline", "a\tb\tc", good, "\x00\x01"]).encode()
+        "\n".join(
+            ["", "# comment", "   ", "short\tline", "a\tb\tc", eight, good, "\x00\x01"]
+        ).encode()
         + b"\n\xff\xfe\xfd\n"
     )
-    assert cookie_names(path) == {"csrftoken"}
+    assert cookie_names(path) == {"csrftoken"}  # строка из 8 полей не считается (ровно 7)
 
 
 def test_reader_cookies_file_empty_gives_no_names(tmp_path):

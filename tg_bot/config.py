@@ -17,6 +17,9 @@ log = logging.getLogger(__name__)
 # <цифры>:<символы [0-9A-Za-z_-]> целиком: без префикса `bot`, кавычек, запятой.
 _TOKEN_RE = re.compile(r"[0-9]+:[0-9A-Za-z_-]+")
 _OWNER_ID_RE = re.compile(r"[0-9]+")
+# Формат Netscape: domain, flag, path, secure, expires, name, value.
+_COOKIE_FIELDS = 7
+_EXPIRES_RE = re.compile(r"[0-9]+")
 
 
 class ConfigError(Exception):
@@ -77,12 +80,39 @@ def _cookies_file(environ: Mapping[str, str]) -> Path | None:
         raise ConfigError("IG_COOKIES_FILE: это не обычный файл")
     if not os.access(path, os.R_OK):
         raise ConfigError("IG_COOKIES_FILE: файл не читается")
+    _check_cookies_format(path)
     if stat.S_IMODE(mode) & 0o077:
         log.warning(
             "IG_COOKIES_FILE: права файла %s шире 600 — cookies доступны другим пользователям",
             oct(stat.S_IMODE(mode)),
         )
     return path
+
+
+def _check_cookies_format(path: Path) -> None:
+    """Каждая строка с данными — формат Netscape: ровно 7 полей через табуляцию, `expires` — цифры.
+
+    Иначе yt-dlp молча пропустит cookies, а ошибка «нужен вход» придёт только на первой загрузке.
+    В ошибке — номер строки и причина, но не содержимое (в строке значения cookies).
+    """
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for number, raw in enumerate(fh, start=1):
+                line = raw.removeprefix("#HttpOnly_").rstrip("\r\n")
+                if not line.strip() or line.startswith("#"):
+                    continue
+                fields = line.split("\t")
+                if len(fields) != _COOKIE_FIELDS:
+                    raise ConfigError(
+                        f"IG_COOKIES_FILE: строка {number}: ожидается {_COOKIE_FIELDS} полей через "
+                        f"табуляцию, найдено {len(fields)}"
+                    )
+                if not _EXPIRES_RE.fullmatch(fields[4]):
+                    raise ConfigError(
+                        f"IG_COOKIES_FILE: строка {number}: поле expires (пятое) — не число"
+                    )
+    except OSError as exc:
+        raise ConfigError(f"IG_COOKIES_FILE: файл не прочитан ({exc.strerror})") from None
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:

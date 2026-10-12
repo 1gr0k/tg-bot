@@ -33,4 +33,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 # Дымовые тесты (реальная сеть, cookies) — вручную: uv run pytest -m smoke.
 addopts = "-m 'not smoke'"
+# Каталоги `tmp_path` не хранятся после теста: в них бывает копия cookies (дымовые тесты).
+tmp_path_retention_policy = "none"
 markers = ["smoke: дымовые тесты загрузчиков на реальных ссылках; вручную, не в CI"]

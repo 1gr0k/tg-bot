@@ -13,6 +13,13 @@ TOKEN = f"{_ID}:{_BODY}"
 OWNER = "424242"
 
 
+def cookie_line(*, name: str = "csrftoken", value: str = "v", expires: str = "1999999999") -> str:
+    return "\t".join([".instagram.com", "TRUE", "/", "TRUE", expires, name, value])
+
+
+COOKIES_TEXT = "# Netscape HTTP Cookie File\n\n" + cookie_line() + "\n"
+
+
 def env(**kwargs: str) -> dict[str, str]:
     base = {"BOT_TOKEN": TOKEN, "OWNER_ID": OWNER}
     base.update(kwargs)
@@ -136,7 +143,7 @@ def test_token_is_not_in_error_with_cookies_problem(tmp_path: Path) -> None:
 
 def test_token_is_not_in_log(caplog: pytest.LogCaptureFixture, tmp_path: Path) -> None:
     cookies = tmp_path / "cookies.txt"
-    cookies.write_text("x")
+    cookies.write_text(COOKIES_TEXT)
     cookies.chmod(0o644)
     with caplog.at_level(logging.DEBUG):
         load_settings(env(IG_COOKIES_FILE=str(cookies)))
@@ -150,7 +157,7 @@ def test_token_is_not_in_log(caplog: pytest.LogCaptureFixture, tmp_path: Path) -
 
 def test_cookies_file_ok(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cookies = tmp_path / "cookies.txt"
-    cookies.write_text("x")
+    cookies.write_text(COOKIES_TEXT)
     cookies.chmod(0o600)
     with caplog.at_level(logging.DEBUG):
         settings = load_settings(env(IG_COOKIES_FILE=f" {cookies}\r"))
@@ -162,7 +169,7 @@ def test_cookies_file_wide_permissions_warns(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     cookies = tmp_path / "cookies.txt"
-    cookies.write_text("x")
+    cookies.write_text(COOKIES_TEXT)
     cookies.chmod(0o644)
     with caplog.at_level(logging.WARNING):
         settings = load_settings(env(IG_COOKIES_FILE=str(cookies)))
@@ -184,10 +191,98 @@ def test_cookies_path_is_directory(tmp_path: Path) -> None:
 @pytest.mark.skipif(os.geteuid() == 0, reason="root читает любой файл")
 def test_cookies_file_unreadable(tmp_path: Path) -> None:
     cookies = tmp_path / "cookies.txt"
-    cookies.write_text("x")
+    cookies.write_text(COOKIES_TEXT)
     cookies.chmod(0o000)
     try:
         with pytest.raises(ConfigError, match="IG_COOKIES_FILE"):
             load_settings(env(IG_COOKIES_FILE=str(cookies)))
     finally:
         cookies.chmod(0o600)
+
+
+# --- формат файла cookies (Netscape: 7 полей, expires — цифры) --------------------------------
+
+# Значение cookie собрано в рантайме: ни в тексте ошибки, ни в логе его быть не должно.
+_SECRET = "val-" + "0123456789abcdef" * 2
+
+
+def _fields(*, n: int = 7, expires: str = "1999999999") -> str:
+    fields = [".instagram.com", "TRUE", "/", "TRUE", expires, "sessionid", _SECRET, "extra"]
+    return "\t".join(fields[:n])
+
+
+_GOOD = cookie_line(name="mid")
+_HTTP_ONLY = "#HttpOnly_" + cookie_line(name="sessionid", value=_SECRET)
+
+VALID_COOKIES_FILES = [
+    pytest.param(COOKIES_TEXT, id="один cookie"),
+    pytest.param(f"# Netscape HTTP Cookie File\n\n   \n{_GOOD}\n{_HTTP_ONLY}\n", id="HttpOnly"),
+    pytest.param(f"{_GOOD}\r\n{_HTTP_ONLY}\r\n", id="CRLF"),
+    pytest.param(cookie_line(expires="0") + "\n", id="сессионный cookie, expires 0"),
+    pytest.param(_GOOD, id="без перевода строки в конце"),
+    pytest.param("", id="пустой файл"),
+    pytest.param("# только комментарий\n", id="только комментарии"),
+]
+
+
+@pytest.mark.parametrize("text", VALID_COOKIES_FILES)
+def test_cookies_file_valid_formats_pass(tmp_path: Path, text: str) -> None:
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text(text, encoding="utf-8", newline="")
+    cookies.chmod(0o600)
+    assert load_settings(env(IG_COOKIES_FILE=str(cookies))).ig_cookies_file == cookies
+
+
+BAD_COOKIES_FILES = [
+    pytest.param(f"# c\n\n{_fields(n=6)}\n", 3, "7 полей", id="шесть полей"),
+    pytest.param(f"{_GOOD}\n{_fields(n=8)}\n", 2, "7 полей", id="восемь полей"),
+    pytest.param(f"{_GOOD}\n{_fields(n=1)}\n", 2, "7 полей", id="одно поле"),
+    pytest.param(
+        "\t".join(_fields().split("\t")[:3]) + " " + " ".join(_fields().split("\t")[3:]) + "\n",
+        1,
+        "7 полей",
+        id="пробелы вместо табуляции",
+    ),
+    pytest.param(f"{_GOOD}\n{_fields(expires='')}\n", 2, "expires", id="expires пуст"),
+    pytest.param(f"{_fields(expires='abc')}\n", 1, "expires", id="expires — буквы"),
+    pytest.param(f"{_fields(expires='-1')}\n", 1, "expires", id="expires отрицательный"),
+    pytest.param(f"{_fields(expires='1.5')}\n", 1, "expires", id="expires дробный"),
+    pytest.param(f"{_fields(expires='12a')}\n", 1, "expires", id="expires: цифры и буква"),
+    pytest.param(
+        f"{_GOOD}\r\n{_HTTP_ONLY}\r\n{_fields(n=6)}\r\n", 3, "7 полей", id="CRLF, строка 3"
+    ),
+    pytest.param(f"#HttpOnly_{_fields(expires='x')}\n", 1, "expires", id="HttpOnly, expires"),
+]
+
+
+@pytest.mark.parametrize(("text", "line", "reason"), BAD_COOKIES_FILES)
+def test_cookies_file_bad_format_is_config_error_with_line_number(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, text: str, line: int, reason: str
+) -> None:
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text(text, encoding="utf-8", newline="")
+    cookies.chmod(0o600)
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as excinfo:
+        load_settings(env(IG_COOKIES_FILE=str(cookies)))
+    message = str(excinfo.value)
+    assert "IG_COOKIES_FILE" in message
+    assert f"строка {line}:" in message
+    assert reason in message
+    # значение cookie и токен — ни в ошибке, ни в логе, ни в цепочке исключений
+    assert _SECRET not in message and _SECRET not in caplog.text
+    assert _BODY not in message
+    assert excinfo.value.__cause__ is None and excinfo.value.__context__ is None
+
+
+def test_cookies_format_checked_before_permission_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Положительный контроль к тексту ошибки: тот же файл с корректной строкой проходит."""
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text(_fields(n=6) + "\n")
+    cookies.chmod(0o644)
+    with caplog.at_level(logging.WARNING), pytest.raises(ConfigError):
+        load_settings(env(IG_COOKIES_FILE=str(cookies)))
+    assert _SECRET not in caplog.text
+    cookies.write_text(_fields() + "\n")
+    assert load_settings(env(IG_COOKIES_FILE=str(cookies))).ig_cookies_file == cookies

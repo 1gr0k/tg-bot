@@ -4,10 +4,9 @@
 - Класс `TestWithoutCookies` — без cookies (Mac/VPN); запускает агент.
 - Класс `TestWithCookies` — нужен `IG_COOKIES_FILE` (путь к файлу cookies Netscape); без него тесты
   пропускаются. Запускает владелец. Значения cookies не читаются и не печатаются; испорченный
-  `sessionid` готовится во временной копии (исходный файл не меняется).
+  `sessionid` готовится во временной копии (исходный файл не меняется, сравнение — по sha256);
+  каталоги с копиями cookies — свой временный каталог, удаляемый в `finally`.
 """
-
-import shutil
 
 import pytest
 
@@ -19,7 +18,10 @@ from tests.smoke._helpers import (
     UNAVAILABLE_WITHOUT_LOGIN,
     codecs,
     download_instagram,
+    file_sha256,
+    private_dir,
     require_cookies,
+    write_broken_sessionid,
 )
 from tg_bot.downloader.instagram import MIN_PHOTO_SIDE
 from tg_bot.downloader.port import LoginRequired, MediaKind
@@ -78,48 +80,43 @@ class TestWithoutCookies:
 
 
 class TestWithCookies:
-    def test_reel_and_p_link(self, tmp_path):
+    """Каталоги загрузки — только внутри `private_dir()` (копия cookies удаляется в `finally`)."""
+
+    def test_reel_and_p_link(self):
         cookies = require_cookies()
-        for name, url in (("reel", REEL), ("p", REEL_VIA_P)):
-            workdir = tmp_path / name
+        with private_dir() as root:
+            for name, url in (("reel", REEL), ("p", REEL_VIA_P)):
+                workdir = root / name
+                workdir.mkdir()
+                _check_reel(download_instagram(url, workdir, cookies), workdir)
+
+    def test_photo_post_and_mixed_carousel(self):
+        cookies = require_cookies()
+        with private_dir() as root:
+            photo_dir, mixed_dir = root / "photo", root / "mixed"
+            photo_dir.mkdir()
+            mixed_dir.mkdir()
+            _check_photo(download_instagram(PHOTO_POST, photo_dir, cookies), photo_dir)
+            _check_mixed(download_instagram(MIXED_CAROUSEL, mixed_dir, cookies), mixed_dir)
+
+    def test_source_cookies_file_is_not_modified(self):
+        """Решение 7: yt-dlp получает копию; исходный файл остаётся тем же (sha256 до и после)."""
+        cookies = require_cookies()
+        before = file_sha256(cookies)
+        with private_dir() as root:
+            workdir = root / "w"
             workdir.mkdir()
-            _check_reel(download_instagram(url, workdir, cookies), workdir)
+            download_instagram(REEL, workdir, cookies)
+        assert file_sha256(cookies) == before
 
-    def test_photo_post_and_mixed_carousel(self, tmp_path):
-        cookies = require_cookies()
-        photo_dir, mixed_dir = tmp_path / "photo", tmp_path / "mixed"
-        photo_dir.mkdir()
-        mixed_dir.mkdir()
-        _check_photo(download_instagram(PHOTO_POST, photo_dir, cookies), photo_dir)
-        _check_mixed(download_instagram(MIXED_CAROUSEL, mixed_dir, cookies), mixed_dir)
-
-    def test_source_cookies_file_is_not_modified(self, tmp_path):
-        """Решение 7: yt-dlp получает копию; исходный файл остаётся байт в байт."""
-        cookies = require_cookies()
-        before = cookies.read_bytes()
-        workdir = tmp_path / "w"
-        workdir.mkdir()
-        download_instagram(REEL, workdir, cookies)
-        assert cookies.read_bytes() == before
-
-    def test_broken_sessionid_is_login_required(self, tmp_path):
+    def test_broken_sessionid_is_login_required(self):
         """Аналог `--mode broken` из пробы 4: значение `sessionid` заменено — cookies отвергнуты."""
         source = require_cookies()
-        broken = tmp_path / "broken.txt"
-        shutil.copyfile(source, broken)
-        lines = broken.read_text(encoding="utf-8").splitlines()
-        patched, found = [], False
-        for line in lines:
-            fields = line.removeprefix("#HttpOnly_").split("\t")
-            if len(fields) >= 7 and fields[5] == "sessionid":
-                found = True
-                fields[6] = "x" * 24
-                line = ("#HttpOnly_" if line.startswith("#HttpOnly_") else "") + "\t".join(fields)
-            patched.append(line)
-        if not found:
-            pytest.skip("в файле cookies нет sessionid")
-        broken.write_text("\n".join(patched) + "\n", encoding="utf-8")
-        workdir = tmp_path / "w"
-        workdir.mkdir()
-        with pytest.raises(LoginRequired):
-            download_instagram(REEL, workdir, broken)
+        with private_dir() as root:
+            broken = root / "broken.txt"
+            if not write_broken_sessionid(source, broken):
+                pytest.skip("в файле cookies нет sessionid")
+            workdir = root / "w"
+            workdir.mkdir()
+            with pytest.raises(LoginRequired):
+                download_instagram(REEL, workdir, broken)
