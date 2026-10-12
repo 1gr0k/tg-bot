@@ -2,7 +2,6 @@
 
 import json
 import logging
-import shutil
 import subprocess
 import threading
 from itertools import pairwise
@@ -11,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.ffmpeg_gate import require_ffmpeg
 from tg_bot.downloader.port import MediaTooLarge
 from tg_bot.downloader.ytdlp import (
     BUDGETS,
@@ -319,8 +319,8 @@ def test_probe_media_failure_gives_empty_probe(tmp_path, run):
     assert probe_media(tmp_path / "a.mp4", run=run) == MediaProbe(None, None, None)
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="нет ffmpeg/ffprobe")
 def test_probe_media_real_ffprobe(tmp_path):
+    require_ffmpeg()  # нет ffmpeg: skip, а при REQUIRE_FFMPEG=1 (CI) — fail
     video = tmp_path / "t.mp4"
     subprocess.run(
         ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=0.5", str(video)],

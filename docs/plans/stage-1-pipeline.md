@@ -337,6 +337,13 @@
     с `checksums.txt`, скачанным рядом; установка — один скрипт `scripts/ci/install-gitleaks.sh`
     для обоих job'ов; `persist-credentials: false` у checkout, `timeout-minutes` у каждого job.
     Отвергнуто: `gitleaks-action` (обёртка, лицензия для org-аккаунтов).
+    **Изменено по ревью части B — ffmpeg в job `test`.** Шаг `apt-get install ffmpeg` и
+    `REQUIRE_FFMPEG=1`: тест с реальным ffprobe (`tests/ffmpeg_gate.require_ffmpeg`) при этом
+    **падает**, если ffmpeg/ffprobe нет, а не пропускается (иначе CI зелёный без единого запуска
+    реального ffprobe). Локально без ffmpeg — пропуск. В `addopts` — `-rs` (причины пропусков в
+    итоге прогона). Контроль на CI: коммит без установки ffmpeg → job `test` красный именно на
+    этом тесте (notes, «Итог части B»). **Часть C:** проверка ffmpeg/ffprobe при старте бота
+    (нет — ошибка запуска с понятным текстом, а не «Скачать не удалось» на первой ссылке).
 20. **Дымовые тесты загрузчиков** — `tests/smoke/`, маркер `smoke`, исключён по умолчанию
     (`addopts = "-m 'not smoke'"`); запуск вручную `uv run pytest -m smoke`; Instagram с cookies —
     запускает пользователь. В CI не идут (ТЗ 11).
@@ -348,6 +355,12 @@
     (потоком; исходные байты не в локальных переменных и не в тексте `assert`). Тест хелперов — на
     фейковом файле cookies (`tests/test_smoke_helpers.py`): после теста, в том числе упавшего,
     каталога с копией нет.
+    **Изменено по ревью части B — маркер на весь каталог.** `tests/smoke/conftest.py`
+    (`pytest_collection_modifyitems`, `tryfirst`) ставит `smoke` всем тестам из `tests/smoke/`:
+    новый файл без `pytestmark` не попадает в обычный прогон и CI. `--strict-markers` в `addopts`:
+    опечатка в маркере — ошибка сбора, а не молчаливый новый маркер. Проверено: временный файл в
+    `tests/smoke/` без `pytestmark` без conftest падает в обычном прогоне, с conftest — отобран
+    как `smoke` (файл не коммитился).
 
     20a. **Очистка вывода yt-dlp от cookies — механически**: yt-dlp кладёт cookies в поле
     `cookies` формата и в `http_headers` (заголовок `Cookie`). Функция `scrub(info)` рекурсивно

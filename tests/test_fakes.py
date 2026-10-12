@@ -115,7 +115,9 @@ def test_gate_holds_download_until_released(workdir):
     assert len(asyncio.run(scenario()).items) == 1
 
 
-def test_cancellation_propagates_like_real_adapter(workdir):
+def test_cancellation_while_gated_propagates_and_fake_writes_nothing(workdir):
+    # Реальный адаптер при отмене может оставить в workdir `cookies.txt` и частичные файлы; фейк —
+    # нет (см. docstring `tests/fakes.py`): тест проверяет только то, что делает фейк.
     async def scenario():
         fake = FakeDownloader([video()], gate=asyncio.Event())
         task = asyncio.create_task(fake.download(LINK, workdir))
