@@ -19,7 +19,10 @@ _TOKEN_RE = re.compile(r"[0-9]+:[0-9A-Za-z_-]+")
 _OWNER_ID_RE = re.compile(r"[0-9]+")
 # Формат Netscape: domain, flag, path, secure, expires, name, value.
 _COOKIE_FIELDS = 7
-_EXPIRES_RE = re.compile(r"[0-9]+")
+# Ровно условие yt-dlp (yt_dlp/cookies.py, `YoutubeDLCookieJar.load`, 2026.8.19, строка 1372):
+# строка отбрасывается, если `expires` непусто и не `[0-9]+(?:\.[0-9]+)?`. Пустое — сессионный
+# cookie, дробное допустимо. Строже нельзя: бот не должен отвергать файл, который yt-dlp принимает.
+_EXPIRES_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 
 
 class ConfigError(Exception):
@@ -90,7 +93,8 @@ def _cookies_file(environ: Mapping[str, str]) -> Path | None:
 
 
 def _check_cookies_format(path: Path) -> None:
-    """Каждая строка с данными — формат Netscape: ровно 7 полей через табуляцию, `expires` — цифры.
+    """Каждая строка с данными — формат Netscape: ровно 7 полей через табуляцию, `expires` пуст
+    или число (как у yt-dlp, см. `_EXPIRES_RE`).
 
     Иначе yt-dlp молча пропустит cookies, а ошибка «нужен вход» придёт только на первой загрузке.
     В ошибке — номер строки и причина, но не содержимое (в строке значения cookies).
@@ -107,7 +111,7 @@ def _check_cookies_format(path: Path) -> None:
                         f"IG_COOKIES_FILE: строка {number}: ожидается {_COOKIE_FIELDS} полей через "
                         f"табуляцию, найдено {len(fields)}"
                     )
-                if not _EXPIRES_RE.fullmatch(fields[4]):
+                if fields[4] and not _EXPIRES_RE.fullmatch(fields[4]):
                     raise ConfigError(
                         f"IG_COOKIES_FILE: строка {number}: поле expires (пятое) — не число"
                     )
