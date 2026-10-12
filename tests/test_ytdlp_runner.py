@@ -11,7 +11,7 @@ import logging
 import shutil
 import tempfile
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -316,6 +316,50 @@ def test_thread_result_after_timeout_is_timeout_without_cause():
 
     error = asyncio.run(scenario())
     assert type(error) is DownloadTimeout and error.__cause__ is None
+
+
+class InlineExecutor(ThreadPoolExecutor):
+    """Выполняет функцию сразу в `submit`: `future` готов до того, как `run` начнёт ждать, а
+    тайм-аут 0 срабатывает в той же итерации цикла — детерминированная «гонка» без потоков."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        done: Future = Future()
+        try:
+            done.set_result(fn(*args, **kwargs))
+        except Exception as exc:  # noqa: BLE001 — перенос в future, как у ThreadPoolExecutor
+            done.set_exception(exc)
+        return done
+
+
+def test_result_ready_when_timeout_fires_is_returned_not_dropped():
+    """Тайм-аут сработал в той же итерации, где `future` завершился: готовый результат отдаётся,
+    а не заменяется `DownloadTimeout` (решение 8.4: отбрасывается только пришедший ПОЗЖЕ)."""
+
+    async def scenario() -> str:
+        runner = ThreadRunner(limit=1, timeout=0, grace=SAFETY, executor=InlineExecutor(1))
+        try:
+            return await runner.run(lambda cancel: "готово")
+        finally:
+            runner.close()
+
+    assert asyncio.run(scenario()) == "готово"
+
+
+def test_error_ready_when_timeout_fires_is_the_thread_error():
+    """Положительный контроль к предыдущему: готова ошибка порта — выбрасывается она."""
+
+    def fail(cancel: threading.Event) -> str:
+        raise MediaTooLarge("файл больше лимита")
+
+    async def scenario() -> None:
+        runner = ThreadRunner(limit=1, timeout=0, grace=SAFETY, executor=InlineExecutor(1))
+        try:
+            with pytest.raises(MediaTooLarge):
+                await runner.run(fail)
+        finally:
+            runner.close()
+
+    asyncio.run(scenario())
 
 
 def test_own_timeout_error_of_function_is_not_a_download_timeout():

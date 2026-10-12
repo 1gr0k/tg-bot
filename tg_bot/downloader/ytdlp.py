@@ -110,6 +110,8 @@ class ThreadRunner:
                 except TimeoutError:
                     if not scope.expired():  # собственный TimeoutError функции — её ошибка
                         raise
+                    if future.done() and not future.cancelled() and future.exception() is None:
+                        return future.result()  # завершился в той же итерации — результат готов
                     cancel.set()
                     thread_error = await self._join(future, started)
                     if isinstance(thread_error, DownloadError):
