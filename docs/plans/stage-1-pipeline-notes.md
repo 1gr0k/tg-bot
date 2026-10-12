@@ -516,6 +516,23 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 
 ## Зубы: часть B
 
+Мутации — по одной на прогон, на копии дерева в scratchpad (`UV_PROJECT_ENVIRONMENT` — окружение
+основного дерева); после прогона файл копии восстановлен из основного дерева.
+
+### `tests/test_scrub.py` (16 тестов зелёные)
+
+Реализация: `stp` (маркер размера картинки, не секрет) сохраняется в заглушке —
+`<signed-url>?stp=…`: без него разбор фото (решение 6) не работает на очищенных фикстурах.
+Заглушкой заменяется любой строковый http(s)-URL с параметром подписи, а не только значения
+известных ключей (новое поле yt-dlp тоже будет очищено).
+
+| # | Мутация в `tests/scrub.py` | Упавшие тесты |
+|---|---|---|
+| 1 | `DROPPED_KEYS` без `http_headers` | `test_scrub_removes_cookies_and_headers_at_any_depth` |
+| 2 | списки не обходятся (`list(info)`) | `…removes_cookies_and_headers_at_any_depth`, `test_scrub_replaces_signed_urls`, `test_scrub_keeps_stp_size_marker` |
+| 3 | нет префикса `_nc_` | `test_scrub_signature_param_variants[…?_nc_sid=1]` |
+| 4 | `stp` не сохраняется (всегда `STUB`) | `test_scrub_keeps_stp_size_marker` |
+
 ## Зубы: часть C
 
 ## Итог части A
