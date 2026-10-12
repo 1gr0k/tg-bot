@@ -119,7 +119,7 @@ expand_vars() {
             return 0
         fi
         # Значение — в кавычках: в bash 5.2 голый `&` в замене подставляет совпавший текст.
-        target=${target/"${BASH_REMATCH[0]}"/"$value"}
+        target=${target/"${BASH_REMATCH[0]}"/$value}
     done
     [[ "$target" != *'$'* ]] || return 0
     printf '%s' "$target"
