@@ -20,9 +20,11 @@ Telegram-бот: скачивает медиа по ссылкам на Instagra
 - Секция `hooks` — `scripts/test-hooks.sh`, кейсы хуков из `.claude/hooks/`. Проверка хука на
   зубы — только на копии: `HOOKS_DIR=<scratchpad>/hooks scripts/test-hooks.sh`.
 - Новый клон: `git config core.hooksPath scripts/git-hooks` — pre-commit с gitleaks (fail-closed:
-  без `gitleaks` в PATH коммит отклоняется; `brew install gitleaks`). Обход флагами коммита
-  запрещён в `settings.json`. Секция `hooks` включает и `scripts/test-git-hooks.sh`; проверка на
-  зубы — на копиях: `GITLEAKS_CONFIG_SRC=<копия .gitleaks.toml>`, `GIT_HOOKS_SRC=<копия каталога>`.
+  без `gitleaks` в PATH коммит отклоняется; `brew install gitleaks`). Обход (`--no-verify`, `-n`,
+  `-c core.hooksPath=…`) блокирует PreToolUse-хук `.claude/hooks/deny-hook-bypass.sh` — это
+  защита от привычки; гарантия — job `gitleaks` в CI по всей истории. Секция `hooks` включает и
+  `scripts/test-git-hooks.sh`; проверка на зубы — на копиях: `GITLEAKS_CONFIG_SRC=<копия
+  .gitleaks.toml>`, `GIT_HOOKS_SRC=<копия каталога>`.
 - Дымовые тесты загрузчиков (`tests/smoke/`, реальная сеть, Instagram с cookies — запускает
   пользователь): `uv run pytest -m smoke`. По умолчанию исключены (`-m 'not smoke'`), в CI не идут.
 

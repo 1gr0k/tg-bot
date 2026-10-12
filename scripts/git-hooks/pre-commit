@@ -12,4 +12,6 @@ fi
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-exec gitleaks git --pre-commit --staged --redact --no-banner --config "$root/.gitleaks.toml"
+# -v — чтобы в выводе были правило, файл и строка находки; сам секрет в нём скрывает только
+# --redact (без него -v печатает значение целиком: не убирать; проверяет scripts/test-git-hooks.sh).
+exec gitleaks git --pre-commit --staged --redact --verbose --no-banner --config "$root/.gitleaks.toml"
