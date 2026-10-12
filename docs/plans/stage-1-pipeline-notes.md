@@ -895,6 +895,14 @@ cookies, испорченный `sessionid` → `LoginRequired`) агент не
 «нет значений cookies в тексте yt-dlp» — допущение, пробой не проверено); CLAUDE.md — блокирующее
 через `ThreadRunner`, а не `asyncio.to_thread`.
 
+**Прогоны CI в PR #3** (2026-10-13, `ubuntu-latest`):
+
+| # | Что | Результат |
+|---|---|---|
+| 1 | головной коммит PR (с установкой ffmpeg и `REQUIRE_FFMPEG=1`) | lint, hooks, test (43 с), gitleaks — зелёные |
+| 2 | контроль M5: коммит без установки ffmpeg | **test красный**: `REQUIRE_FFMPEG=1, но нет в PATH: ffmpeg, ffprobe`, `1 failed, 470 passed, 12 deselected` — упал тест с реальным ffprobe (не пропущен); lint, hooks, gitleaks зелёные |
+| 3 | `git revert` контроля | lint, hooks, test, gitleaks — зелёные |
+
 **Проба текста `max_filesize`** (2026-10-13, yt-dlp 2026.08.19, локальный сервер, файл 200 000
 байт): при `max_filesize=100000` — файла нет, исключения нет, в `logger.debug` одна строка
 `\r[download] File is larger than max-filesize (200000 bytes > 100000 bytes). Aborting.`; при
