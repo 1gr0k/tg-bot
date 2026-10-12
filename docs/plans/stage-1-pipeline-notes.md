@@ -519,6 +519,47 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 Мутации — по одной на прогон, на копии дерева в scratchpad (`UV_PROJECT_ENVIRONMENT` — окружение
 основного дерева); после прогона файл копии восстановлен из основного дерева.
 
+### `tg_bot/downloader/ytdlp.py` (`test_ytdlp_runner.py` 10, `test_ytdlp_errors.py` 25, `test_ytdlp_budget.py` 33)
+
+Мутации — скриптом на копии дерева (`mutate.sh`: одна строковая мутация, основное дерево не
+трогается; число изменённых строк проверяется). Тесты решения 8 — без реального yt-dlp и без
+sleep: функция ждёт `threading.Event`, тест ждёт состояния (поток стартовал, флаг выставлен,
+поток завершился); числа 0.05 — тайм-аут/порог параметром, 10 с — предохранитель.
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| R1 | **удалить каталог, не дожидаясь потока** (`DownloadTimeout` без `_join`) | `test_timeout_waits_for_thread_that_ignores_flag` (каталог жив, поток жив, запись в каталог), `test_semaphore_is_held_until_thread_finishes`, `test_timeout_interrupts_download_phase_by_itself`, `test_warning_when_thread_outlives_grace` |
+| R2 | **не выставлять флаг отмены** при тайм-ауте | `test_timeout_waits_for_thread_that_ignores_flag`, `test_semaphore_is_held_until_thread_finishes`, `test_timeout_interrupts_download_phase_by_itself` |
+| R3 | отпустить семафор при тайм-ауте, не дожидаясь потока | `test_semaphore_is_held_until_thread_finishes` (только он) |
+| R4 | пул по умолчанию вместо своего | `test_semaphore_is_held_until_thread_finishes`, `test_runner_uses_its_own_pool_not_default`, `test_default_pool_is_named_and_not_asyncio_default` |
+| R5 | `CancelledError` проглочен (`return None` вместо `raise`) | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread`, `test_cancelled_error_without_error_log_when_thread_stops_in_time` |
+| R6 | нет `WARNING` после порога | `test_warning_when_thread_outlives_grace` |
+| R7 | нет `ERROR` при остановке с живым потоком | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread` |
+| R8 | при `CancelledError` флаг не выставляется | оба `test_cancelled_error_*` |
+| R9 | ожидание при остановке без порога | `test_cancelled_error_propagates_and_logs_error_for_stuck_thread` |
+| B1 | `size <= limit` → `<` | `test_exact_limit_passes_one_byte_more_does_not` |
+| B2 | неудачная попытка не удаляется | `test_oversize_attempt_is_removed_before_next_one` |
+| B3 | статус 429 не распознаётся | `test_translate_error[…RateLimited]` ×2 |
+| B4 | `session_lost` без «был до загрузки» | `test_no_session_before_means_not_lost` |
+| B5 | копия cookies с правами 644 | `test_copy_is_private_inside_workdir_and_source_untouched` |
+| B6 | «Failed to parse JSON» всегда `LoginRequired` | `test_translate_error[…DownloadFailed]`, `test_boundary_uses_session_lost_for_parse_json` |
+| B7 | граница ловит `Exception` | `test_boundary_passes_port_errors_cancel_and_own_bugs_unchanged` |
+| B8 | «файла нет» (yt-dlp пропустил по `max_filesize`) считается годным | `test_ytdlp_skipped_file_by_max_filesize_counts_as_too_large` |
+| B9 | поворот ffprobe не учитывается | `test_parse_probe[поворот 90°]` |
+| B11 | нет `socket_timeout` | `test_base_options_have_socket_timeout_hook_and_size_guard` |
+| B12 | хук не смотрит на флаг | `test_progress_hook_raises_only_when_flag_set`, `…_base_options_…` |
+| B13 | число уровня бюджета изменено | `test_budget_selector_table[0]` |
+| B16 | статус не ищется в `.cause` | `test_translate_error[ExtractorError…429]` |
+
+Различимость «пул по умолчанию» (R4): тест отличает его только потому, что `ThreadRunner` принимает
+`executor` (внедрение для тестов): задачи считаются на переданном пуле, плюс имя потока `ytdlp*` у
+пула по умолчанию. `max_workers` собственного пула тестом не проверяется (равен лимиту семафора по
+построению, отдельная мутация невозможна без чтения приватных полей `ThreadPoolExecutor`).
+
+**Проба `max_filesize`** (локальный сервер, файл 200 000 байт, `max_filesize=100000`): без
+исключения, **файла нет**, `requested_downloads` есть. Поэтому «файла нет» при заданном
+`max_filesize` трактуется как «слишком большой» (следующий уровень бюджета / `MediaTooLarge`).
+
 ### `tests/test_scrub.py` (17 тестов зелёные)
 
 Находка при снятии фикстур (п. 3): у YouTube подпись, `ip` (IP машины) и `expire` лежат **в пути**
