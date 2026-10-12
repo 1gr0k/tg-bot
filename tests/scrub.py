@@ -38,8 +38,11 @@ def _scrub_url(value: str) -> str:
     """Подписанный URL → заглушка (с `stp`, если он был); остальные строки — как есть."""
     if not value.startswith(("http://", "https://")):
         return value
-    query = parse_qsl(urlsplit(value).query, keep_blank_values=True)
-    if not any(_is_signature_param(name) for name, _ in query):
+    parts = urlsplit(value)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    # YouTube (manifest.googlevideo.com) кладёт `sig`, `ip`, `expire` в путь: `…/sig/<значение>/…`.
+    in_path = any(_is_signature_param(segment) for segment in parts.path.split("/"))
+    if not in_path and not any(_is_signature_param(name) for name, _ in query):
         return value
     for name, marker in query:
         if name == "stp":

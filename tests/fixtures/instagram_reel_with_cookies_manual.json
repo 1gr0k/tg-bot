@@ -1,0 +1,28 @@
+{
+ "_note": "СОБРАНО ВРУЧНУЮ по notes (проба 4, прогон с cookies): настоящий info dict с cookies в репозиторий не кладётся. Взят instagram_reel.json; добавлено только то, что по notes есть лишь с cookies: у прогрессивного формата width=720, height=1280, filesize_approx (≈ размер файла 13.81 МБ, число приблизительное), duration=73.3; format_id вида «<число>v-2» вместо «3».",
+ "channel": "user",
+ "comment_count": 405,
+ "description": "Угорели по искусству? #наполеоны #рилс #сибиряки",
+ "duration": 73.3,
+ "extractor": "Instagram",
+ "extractor_key": "Instagram",
+ "formats": [
+  {"format_id": "1928919455156309v-2", "ext": "mp4", "url": "<signed-url>", "width": 720, "height": 1280, "filesize_approx": 13810000, "vcodec": null, "acodec": null},
+  {"acodec": "none", "container": "mp4_dash", "ext": "mp4", "filesize": null, "format_id": "dash-1928962345152020v", "format_note": "DASH video", "height": 1280, "tbr": 180.454, "url": "<signed-url>", "vcodec": "vp09.00.31.08.00.01.01.01.00", "width": 720},
+  {"acodec": "mp4a.40.5", "container": "m4a_dash", "ext": "m4a", "filesize": null, "format_id": "dash-1928918978489690a", "format_note": "DASH audio", "tbr": 50.354, "url": "<signed-url>", "vcodec": "none", "width": null, "height": null}
+ ],
+ "id": "DeRrI8_BTZz",
+ "like_count": 18766,
+ "original_url": "https://www.instagram.com/reel/DeRrI8_BTZz/",
+ "thumbnails": [
+  {"url": "<signed-url>?stp=dst-jpg_e15_p480x480_tt6"},
+  {"url": "<signed-url>?stp=dst-jpg_e15_tt6"}
+ ],
+ "timestamp": 1791554407,
+ "title": "Video by user",
+ "uploader": "user",
+ "uploader_id": "user",
+ "webpage_url": "https://www.instagram.com/reel/DeRrI8_BTZz/",
+ "webpage_url_basename": "DeRrI8_BTZz",
+ "webpage_url_domain": "instagram.com"
+}

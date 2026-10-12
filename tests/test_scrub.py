@@ -139,6 +139,19 @@ def test_scrub_signature_param_variants(url):
     assert scrub({"any_new_field": url}) == {"any_new_field": STUB}
 
 
+_YT_PATH_SIGNED = (
+    "https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1791861846/ei/X/"
+    "ip/203.0.113.7/id/d7c3/itag/233/sig/AE0sSECRET%3D%3D/file/index.m3u8"
+)
+
+
+def test_scrub_replaces_urls_with_signature_in_path():
+    """Положительный контроль: у YouTube нет query — подпись и IP лежат в пути (находка части B)."""
+    assert "SECRET" in _YT_PATH_SIGNED and "203.0.113.7" in _YT_PATH_SIGNED
+    cleaned = scrub({"formats": [{"manifest_url": _YT_PATH_SIGNED, "url": _YT_PATH_SIGNED}]})
+    assert cleaned == {"formats": [{"manifest_url": STUB, "url": STUB}]}
+
+
 @pytest.mark.parametrize(
     "value",
     [

@@ -519,7 +519,11 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 Мутации — по одной на прогон, на копии дерева в scratchpad (`UV_PROJECT_ENVIRONMENT` — окружение
 основного дерева); после прогона файл копии восстановлен из основного дерева.
 
-### `tests/test_scrub.py` (16 тестов зелёные)
+### `tests/test_scrub.py` (17 тестов зелёные)
+
+Находка при снятии фикстур (п. 3): у YouTube подпись, `ip` (IP машины) и `expire` лежат **в пути**
+URL (`…/expire/…/ip/…/sig/…`), без query; первая версия `scrub` смотрела только на query и их
+пропустила. Добавлена проверка сегментов пути + тест (мутация 5).
 
 Реализация: `stp` (маркер размера картинки, не секрет) сохраняется в заглушке —
 `<signed-url>?stp=…`: без него разбор фото (решение 6) не работает на очищенных фикстурах.
@@ -532,6 +536,7 @@ L10: ревьюер имел в виду `test_token_is_not_in_error_with_cookie
 | 2 | списки не обходятся (`list(info)`) | `…removes_cookies_and_headers_at_any_depth`, `test_scrub_replaces_signed_urls`, `test_scrub_keeps_stp_size_marker` |
 | 3 | нет префикса `_nc_` | `test_scrub_signature_param_variants[…?_nc_sid=1]` |
 | 4 | `stp` не сохраняется (всегда `STUB`) | `test_scrub_keeps_stp_size_marker` |
+| 5 | подпись в пути URL не проверяется (`in_path = False`) | `test_scrub_replaces_urls_with_signature_in_path` |
 
 ## Зубы: часть C
 
