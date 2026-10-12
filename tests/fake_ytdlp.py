@@ -37,6 +37,7 @@ class Script:
         photos: dict[str, bytes] | None = None,
         error: BaseException | None = None,
         photo_error: BaseException | None = None,
+        entry_errors: dict[str, BaseException] | None = None,
         cookies_after: str | None = None,
         ignore_max_filesize: bool = False,
         silent_skip: bool = False,
@@ -47,7 +48,10 @@ class Script:
         self.photos = photos or {}
         self.error = error
         self.photo_error = photo_error
-        self.cookies_after = cookies_after  # во что yt-dlp «перепишет» cookiefile при выходе
+        self.entry_errors = entry_errors or {}  # id видео-элемента → ошибка `process_ie_result`
+        # во что yt-dlp «перепишет» cookiefile при выходе из `with` (в `close()`; без `sessionid` —
+        # сессия потеряна). Раньше выхода файл не меняется — как у настоящего yt-dlp.
+        self.cookies_after = cookies_after
         self.ignore_max_filesize = ignore_max_filesize
         # «файла нет» без сообщения о max_filesize (не «слишком большой», а сбой yt-dlp)
         self.silent_skip = silent_skip
@@ -127,6 +131,8 @@ class FakeYDL:
     def process_ie_result(self, entry: dict[str, Any], download: bool = True) -> dict[str, Any]:
         entry_id = entry["id"]
         self._script.process_calls.append(entry_id)
+        if entry_id in self._script.entry_errors:
+            raise self._script.entry_errors[entry_id]
         path = self._write_video(entry_id, self._script.size_for(entry_id))
         return {
             "id": entry_id,
