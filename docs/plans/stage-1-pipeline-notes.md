@@ -371,6 +371,23 @@ _Часть B: читатели info dict yt-dlp; часть C: читатели
 только значение). Секреты в тесте — без слов «telegr»/«token» в файле, чтобы встроенные правила не
 маскировали отсутствие своего (мутации 1–3 это подтверждают).
 
+### `tests/test_links.py` (59 тестов зелёные; мутации на копии дерева, по одной на прогон)
+
+| # | Мутация в `tg_bot/links.py` | Упавшие тесты |
+|---|---|---|
+| 1 | убрано `(?!stories/)` | `test_negative[…/stories/p/1234567890/]` |
+| 2 | lookbehind без `/` и `=` | `test_negative[https://example.com/?u=instagram.com/reel/…]`, `[https://example.com/instagram.com/reel/…]` |
+| 3 | id Shorts `{11}` → `{6,}` | `test_negative[…/shorts/<11 символов>x]` |
+| 4 | убрано `(?!audio/)` | `test_negative[…/reels/audio/1234567890/]` |
+| 5 | `reels?` → `reel` | `test_positive[…/reels/<код>/]` |
+| 6 | дубликат по `url`, а не по (платформа, id) | `test_positive[/p/<код> + /reel/<код>]` |
+| 7 | предел ссылок +1 | `test_limit_per_message` |
+| 8 | нет границы конца идентификатора | `test_negative[…/shorts/<11 символов>x]` |
+| 9 | `/p/` → `PostKind.REEL` (тип по пути) | 9 тестов: все `/p/…` в `test_positive`, `test_p_does_not_determine_publication_type`, `test_reel_and_p_with_same_code_differ_in_kind_only`, `test_candidates_are_combined_and_deduplicated` |
+
+Решение по реализации (в плане не уточнено): дубликат — та же платформа и идентификатор, поэтому
+`/reel/<код>` и `/p/<код>` схлопываются в первую по порядку ссылку.
+
 ## Зубы: часть B
 
 ## Зубы: часть C
