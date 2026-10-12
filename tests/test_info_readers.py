@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -127,10 +128,37 @@ def test_reader_thumbnail_stp_huge_digits_do_not_crash():
 # --- ошибки yt-dlp ----------------------------------------------------------------------------
 
 
-def test_reader_error_chain_with_cycle_does_not_hang():
+def _cycle_via_cause_attr() -> Exception:
     first, second = Exception("a"), Exception("b")
     first.cause, second.cause = second, first  # type: ignore[attr-defined]
-    assert type(translate_error(first)) is DownloadFailed
+    return first
+
+
+def _cycle_via_dunder_cause() -> Exception:
+    first, second = Exception("a"), Exception("b")
+    first.__cause__, second.__cause__ = second, first
+    return first
+
+
+def _cycle_via_exc_info() -> Exception:
+    first, second = YtDownloadError("a"), YtDownloadError("b")
+    first.exc_info = (type(second), second, None)
+    second.exc_info = (type(first), first, None)
+    return first
+
+
+@pytest.mark.parametrize(
+    "make", [_cycle_via_cause_attr, _cycle_via_dunder_cause, _cycle_via_exc_info]
+)
+def test_reader_error_chain_with_cycle_does_not_hang(make):
+    """Вызов — в потоке с `join(5)`: при зацикливании тест падает, а не вешает прогон."""
+    result: list[type] = []
+    exc = make()
+    worker = threading.Thread(target=lambda: result.append(type(translate_error(exc))), daemon=True)
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive(), "translate_error зациклился на цепочке ошибок"
+    assert result == [DownloadFailed]
 
 
 @pytest.mark.parametrize("status", ["429", None, 4.29, [429]])

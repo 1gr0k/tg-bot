@@ -88,7 +88,9 @@ class ThreadRunner:
         )
 
     def close(self) -> None:
-        """Остановка бота: новых задач нет, ждать потоки не нужно (их ждёт `run`)."""
+        """Не принимает новые задачи и не ждёт потоки: `run` уже отменил их флагом и ждал не дольше
+        порога. Зависший поток переживёт `close`, и выход интерпретатора ждёт его — процесс
+        останавливается по `stop_grace_period` compose (SIGKILL), см. раздел развёртывания плана."""
         self._executor.shutdown(wait=False, cancel_futures=True)
 
     async def run[T](self, func: Callable[[threading.Event], T]) -> T:
@@ -96,22 +98,38 @@ class ThreadRunner:
             cancel = threading.Event()
             loop = asyncio.get_running_loop()
             future = loop.run_in_executor(self._executor, func, cancel)
+            # Исключение потока забирается всегда, в том числе когда `run` уже не ждёт (остановка).
+            future.add_done_callback(self._consume)
             started = loop.time()
+            scope = asyncio.timeout(self._timeout)
             try:
                 try:
-                    async with asyncio.timeout(self._timeout):
+                    async with scope:
                         return await asyncio.shield(future)
                 except TimeoutError:
+                    if not scope.expired():  # собственный TimeoutError функции — её ошибка
+                        raise
                     cancel.set()
-                    await self._join(future, started)
-                    raise DownloadTimeout(f"тайм-аут {self._timeout:g} сек") from None
+                    thread_error = await self._join(future, started)
+                    if isinstance(thread_error, DownloadError):
+                        # Поток успел дать настоящую причину (например, файл слишком большой).
+                        log.warning(
+                            "тайм-аут %g сек, но поток завершился ошибкой %s через %.1f сек",
+                            self._timeout,
+                            type(thread_error).__name__,
+                            loop.time() - started,
+                        )
+                        raise thread_error from None
+                    raise DownloadTimeout(f"тайм-аут {self._timeout:g} сек") from thread_error
             except asyncio.CancelledError:
                 cancel.set()
                 await self._join_bounded(future, started)
                 raise
 
-    async def _join(self, future: "asyncio.Future[Any]", started: float) -> None:
-        """Ждёт конец потока после флага отмены; после порога — WARNING, ожидание продолжается."""
+    async def _join(self, future: "asyncio.Future[Any]", started: float) -> BaseException | None:
+        """Ждёт конец потока после флага отмены; после порога — WARNING, ожидание продолжается.
+
+        Возвращает исключение потока (или `None`: результат, отмена)."""
         loop = asyncio.get_running_loop()
         done, _ = await asyncio.wait({future}, timeout=self._grace)
         if not done:
@@ -121,13 +139,12 @@ class ThreadRunner:
                 loop.time() - started,
             )
             await asyncio.wait({future})
-        self._consume(future)
+        return None if future.cancelled() else future.exception()
 
     async def _join_bounded(self, future: "asyncio.Future[Any]", started: float) -> None:
         """Остановка бота: ждём поток не дольше порога; не успел — ERROR."""
         done, _ = await asyncio.wait({future}, timeout=self._grace)
         if done:
-            self._consume(future)
             return
         log.error(
             "поток yt-dlp не завершился за %.0f сек после отмены (идёт %.0f сек); каталог загрузки "
@@ -138,9 +155,10 @@ class ThreadRunner:
 
     @staticmethod
     def _consume(future: "asyncio.Future[Any]") -> None:
-        """Забирает исключение потока, чтобы asyncio не жаловался; оно уже не нужно."""
+        """Done-callback: забирает исключение потока, чтобы asyncio не жаловался «never
+        retrieved», когда `run` уже не ждёт. Тому, кто ждёт, исключение остаётся доступным."""
         if not future.cancelled() and (exc := future.exception()) is not None:
-            log.debug("поток после флага отмены завершился ошибкой %s", type(exc).__name__)
+            log.debug("поток yt-dlp завершился ошибкой %s", type(exc).__name__)
 
 
 # --- бюджет размера (решение 9) ---------------------------------------------------------------

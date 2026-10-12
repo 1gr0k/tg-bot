@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import gc
 import logging
 import shutil
 import tempfile
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tg_bot.downloader.port import DownloadFailed, DownloadTimeout
+from tg_bot.downloader.port import DownloadFailed, DownloadTimeout, MediaTooLarge
 from tg_bot.downloader.ytdlp import Cancelled, ThreadRunner
 
 SAFETY = 10  # с; предохранитель, нормальный ход теста его не использует
@@ -235,6 +236,175 @@ def test_result_and_errors_pass_through_without_timeout():
         runner.close()
 
     asyncio.run(scenario())
+
+
+class Ends:
+    """Функция, игнорирующая флаг до `release`, а потом завершающаяся заданным образом."""
+
+    def __init__(self, *, raises: BaseException | None = None, result: str = "ok") -> None:
+        self.raises = raises
+        self.result = result
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.cancel: threading.Event | None = None
+
+    def __call__(self, cancel: threading.Event) -> str:
+        self.cancel = cancel
+        self.started.set()
+        self.release.wait(SAFETY)
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+
+async def _timed_out(runner: ThreadRunner, fn: Ends) -> BaseException:
+    """Запускает `fn`, ждёт срабатывания тайм-аута, отпускает поток; возвращает ошибку `run`."""
+    task = asyncio.create_task(runner.run(fn))
+    assert await happened(fn.started)
+    assert await happened(fn.cancel)  # флаг выставлен — тайм-аут сработал
+    fn.release.set()
+    with pytest.raises(BaseException) as caught:
+        await task
+    return caught.value
+
+
+def test_thread_error_after_timeout_wins_over_timeout(watch):
+    """M1: поток после тайм-аута закончился `DownloadError` — это и есть причина; WARNING с
+    длительностью."""
+    error = MediaTooLarge("файл больше лимита")
+
+    async def scenario() -> BaseException:
+        runner = ThreadRunner(limit=1, timeout=TIMEOUT, grace=SAFETY)
+        try:
+            return await _timed_out(runner, Ends(raises=error))
+        finally:
+            runner.close()
+
+    assert asyncio.run(scenario()) is error
+    assert [r.levelno for r in watch.records] == [logging.WARNING]
+    message = watch.records[0].getMessage()
+    assert "MediaTooLarge" in message and "сек" in message
+
+
+@pytest.mark.parametrize(
+    "raises",
+    [Cancelled(), ValueError("своя ошибка"), TimeoutError("из потока")],
+    ids=["Cancelled", "ValueError", "TimeoutError"],
+)
+def test_other_thread_outcome_after_timeout_is_timeout_from_it(watch, raises):
+    async def scenario() -> BaseException:
+        runner = ThreadRunner(limit=1, timeout=TIMEOUT, grace=SAFETY)
+        try:
+            return await _timed_out(runner, Ends(raises=raises))
+        finally:
+            runner.close()
+
+    error = asyncio.run(scenario())
+    assert type(error) is DownloadTimeout
+    # asyncio копирует `TimeoutError` из потока в новый объект (тот же тип и аргументы)
+    assert type(error.__cause__) is type(raises) and error.__cause__.args == raises.args
+    assert watch.records == []  # WARNING только для ошибки порта
+
+
+def test_thread_result_after_timeout_is_timeout_without_cause():
+    async def scenario() -> BaseException:
+        runner = ThreadRunner(limit=1, timeout=TIMEOUT, grace=SAFETY)
+        try:
+            return await _timed_out(runner, Ends(result="поздно"))
+        finally:
+            runner.close()
+
+    error = asyncio.run(scenario())
+    assert type(error) is DownloadTimeout and error.__cause__ is None
+
+
+def test_own_timeout_error_of_function_is_not_a_download_timeout():
+    """L2: тайм-аут определяет сам `asyncio.timeout` (expired), а не тип `TimeoutError`."""
+
+    async def scenario() -> None:
+        runner = ThreadRunner(limit=1, timeout=SAFETY)
+
+        def fn(cancel: threading.Event) -> None:
+            raise TimeoutError("сокет")
+
+        try:
+            with pytest.raises(TimeoutError, match="сокет") as caught:
+                await runner.run(fn)
+            assert type(caught.value) is TimeoutError  # не DownloadTimeout
+        finally:
+            runner.close()
+
+    asyncio.run(scenario())
+
+
+def test_semaphore_is_released_after_thread_error():
+    """L3: ошибка потока отпускает семафор — вторая задача при `limit=1` стартует."""
+
+    async def scenario() -> None:
+        executor = CountingExecutor(max_workers=2)
+        runner = ThreadRunner(limit=1, timeout=SAFETY, executor=executor)
+
+        def fail(cancel: threading.Event) -> None:
+            raise DownloadFailed("упала")
+
+        second = Blocking(honors_flag=False)
+        second.release.set()
+        with pytest.raises(DownloadFailed):
+            await runner.run(fail)
+        # wait_for: при утечке семафора тест падает через 5 с, а не висит
+        assert await asyncio.wait_for(runner.run(second), 5) == "done"
+        assert executor.submitted == 2
+        runner.close()
+
+    asyncio.run(scenario())
+
+
+def test_semaphore_is_released_after_cancelled_error():
+    """L3: `CancelledError` (остановка) тоже отпускает семафор; вторая задача стартует."""
+
+    async def scenario() -> None:
+        runner = ThreadRunner(limit=1, timeout=SAFETY, grace=SAFETY)
+        first = Blocking(honors_flag=True)
+        task1 = asyncio.create_task(runner.run(first))
+        assert await happened(first.started)
+        second = Blocking(honors_flag=False)
+        second.release.set()
+        task2 = asyncio.create_task(runner.run(second))
+        await settle()
+        assert not second.started.is_set()  # ждёт семафор
+        task1.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task1
+        assert await asyncio.wait_for(task2, 5) == "done"  # при утечке семафора — падение за 5 с
+        assert second.started.is_set()
+        runner.close()
+
+    asyncio.run(scenario())
+
+
+def test_thread_error_is_retrieved_even_when_run_no_longer_waits():
+    """L4: поток, завершившийся ошибкой после остановки, не даёт «exception was never
+    retrieved» — исключение забирает done-callback."""
+    complaints: list[dict] = []
+
+    async def scenario() -> None:
+        asyncio.get_running_loop().set_exception_handler(lambda loop, ctx: complaints.append(ctx))
+        runner = ThreadRunner(limit=1, timeout=SAFETY, grace=TIMEOUT)
+        fn = Ends(raises=DownloadFailed("после остановки"))
+        task = asyncio.create_task(runner.run(fn))
+        assert await happened(fn.started)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task  # `run` вышел, поток ещё жив
+        del task
+        fn.release.set()  # поток падает, когда ждать уже некому
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            gc.collect()
+        runner.close()
+
+    asyncio.run(scenario())
+    assert complaints == []
 
 
 def test_warning_when_thread_outlives_grace(watch):
