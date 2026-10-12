@@ -344,6 +344,11 @@ _Часть B: читатели info dict yt-dlp; часть C: читатели
 правил не потребовалось. Правило `instagram-sessionid-pair` на настоящих секретах не проверялось
 (формат `sessionid=` в файлах нет) — только автотестом хука.
 
+## Прогон gitleaks по истории
+
+`gitleaks git --redact -v --no-banner --config .gitleaks.toml` (2026-10-13, ветка
+`stage-1-pipeline`): 28 коммитов, ~285 780 байт — `no leaks found`.
+
 ## Зубы: часть A
 
 Мутации — по одной на прогон, только на копиях (`GIT_HOOKS_SRC` / `GITLEAKS_CONFIG_SRC` у
