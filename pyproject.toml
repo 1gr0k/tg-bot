@@ -22,6 +22,12 @@ include = ["*.py", "*.pyi"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF", "BLE"]
+# Комментарии и docstring на русском: «с», «ТЗ» ruff принимает за латиницу.
+ignore = ["RUF002", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+# Дымовые тесты (реальная сеть, cookies) — вручную: uv run pytest -m smoke.
+addopts = "-m 'not smoke'"
+markers = ["smoke: дымовые тесты загрузчиков на реальных ссылках; вручную, не в CI"]

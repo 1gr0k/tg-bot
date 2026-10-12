@@ -1,0 +1,17 @@
+#!/bin/bash
+# pre-commit: поиск секретов в индексе (gitleaks). Нет gitleaks в PATH — коммит отклоняется
+# (fail-closed): защита, которая молча не работает, хуже её отсутствия.
+# Включение в новом клоне: git config core.hooksPath scripts/git-hooks
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks не найден в PATH — коммит отклонён (fail-closed)." >&2
+    echo "pre-commit: установите gitleaks (macOS: brew install gitleaks) и повторите коммит." >&2
+    exit 1
+fi
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+# -v — чтобы в выводе были правило, файл и строка находки; сам секрет в нём скрывает только
+# --redact (без него -v печатает значение целиком: не убирать; проверяет scripts/test-git-hooks.sh).
+exec gitleaks git --pre-commit --staged --redact --verbose --no-banner --config "$root/.gitleaks.toml"
