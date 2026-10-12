@@ -36,6 +36,13 @@ def test_result_keeps_order_and_defaults():
     assert result.caption == ""
 
 
+def test_result_skipped_defaults_to_zero_and_is_not_negative():
+    assert DownloadResult(items=(_item(),)).skipped == 0
+    assert DownloadResult(items=(_item(),), skipped=2).skipped == 2
+    with pytest.raises(ValueError):
+        DownloadResult(items=(_item(),), skipped=-1)
+
+
 def test_structures_are_frozen():
     with pytest.raises(dataclasses.FrozenInstanceError):
         _item().width = 1  # type: ignore[misc]

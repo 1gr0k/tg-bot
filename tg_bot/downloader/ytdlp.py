@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -199,8 +200,9 @@ def fit_budget(
     """Загрузка с проверкой фактического размера: больше `limit` — следующий уровень бюджета.
 
     `attempt(budget, subdir)` качает в новый подкаталог `workdir` и возвращает файл; `None` — yt-dlp
-    сам пропустил файл по `max_filesize` (проба: без исключения и без файла) — это «слишком
-    большой». Уровни кончились — `MediaTooLarge`.
+    сам пропустил файл по `max_filesize` (проба: без исключения и без файла, но с сообщением в
+    `logger.debug` — `YdlLogger`) — это «слишком большой»; «файла нет» без сообщения `attempt`
+    обязан превратить в `DownloadFailed`, а не в `None`. Уровни кончились — `MediaTooLarge`.
     """
     for number, budget in enumerate(BUDGETS, start=1):
         if cancel.is_set():
@@ -333,11 +335,27 @@ def translating_errors(cookies: CookiesCopy | None = None) -> Iterator[None]:
 # --- опции yt-dlp -----------------------------------------------------------------------------
 
 
-class _YdlLogger:
-    """Вывод yt-dlp — в logging; отладочный вывод не нужен."""
+# Текст yt-dlp при пропуске файла по `max_filesize` (проба 2026-10-13, yt-dlp 2026.08.19: уходит
+# в `logger.debug`, с ведущим `\r`; без исключения и без файла).
+_MAX_FILESIZE_MSG = re.compile(r"File is larger than max-filesize \((\d+) bytes > (\d+) bytes\)")
+
+
+class YdlLogger:
+    """Вывод yt-dlp — в logging; один экземпляр на попытку загрузки.
+
+    Единственное, что берётся из отладочного вывода, — сообщение «файл больше max-filesize»:
+    по нему «файла нет» отличается от «слишком большой» (правило: «файла нет» без этого сообщения
+    — `DownloadFailed`, с ним — `MediaTooLarge`). Размер из сообщения идёт в лог.
+    """
+
+    def __init__(self) -> None:
+        self._size_exceeded = False
 
     def debug(self, msg: str) -> None:
-        pass
+        found = _MAX_FILESIZE_MSG.search(msg)
+        if found:
+            self._size_exceeded = True
+            log.info("yt-dlp пропустил файл по max_filesize: %s байт, лимит %s", found[1], found[2])
 
     def warning(self, msg: str) -> None:
         log.warning("yt-dlp: %s", msg)
@@ -345,13 +363,23 @@ class _YdlLogger:
     def error(self, msg: str) -> None:
         log.debug("yt-dlp: %s", msg)
 
+    def take_size_exceeded(self) -> bool:
+        """Был ли пропуск по `max_filesize` с прошлого вызова; флаг сбрасывается."""
+        flagged, self._size_exceeded = self._size_exceeded, False
+        return flagged
 
-def base_options(cancel: threading.Event, *, cookies: CookiesCopy | None = None) -> dict[str, Any]:
+
+def base_options(
+    cancel: threading.Event,
+    *,
+    cookies: CookiesCopy | None = None,
+    logger: YdlLogger | None = None,
+) -> dict[str, Any]:
     """Общие опции: сокет-тайм-аут (решение 8), хук отмены, страховка `max_filesize`, cookies."""
     options: dict[str, Any] = {
         "quiet": True,
         "noprogress": True,
-        "logger": _YdlLogger(),
+        "logger": logger or YdlLogger(),
         "socket_timeout": SOCKET_TIMEOUT,
         "progress_hooks": [progress_hook(cancel)],
         "max_filesize": SEND_LIMIT_BYTES,

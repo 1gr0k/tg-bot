@@ -140,6 +140,48 @@ def test_pick_photo_url_skips_bad_items_but_keeps_good_ones():
     assert pick_photo_url(items) == f"{STUB}?stp=dst-jpg_s640x640_tt6"
 
 
+def _sized(url: str, width, height) -> dict:
+    return {"url": url, "width": width, "height": height}
+
+
+def test_dimensions_decide_when_thumbnails_have_them():
+    """L10: есть `width/height` — выбор по ним (наибольшая площадь), маркер `stp` не нужен."""
+    small, big, mid = f"{STUB}?a=1", f"{STUB}?a=2", f"{STUB}?a=3"
+    items = [_sized(small, 320, 320), _sized(big, 1080, 1350), _sized(mid, 640, 800)]
+    assert pick_photo_url(items) == big
+    assert pick_photo_url(items[::-1]) == big
+
+
+def test_dimensions_beat_stp_markers_and_unmarked_url():
+    """Данные поля важнее догадки по `stp`: «немаркированный» URL меньше по width/height."""
+    unmarked = _sized(f"{STUB}?stp=dst-jpg_e35_tt6", 320, 320)
+    marked = _sized(f"{STUB}?stp=dst-jpg_e35_p640x640_tt6", 1080, 1080)
+    assert pick_photo_url([unmarked, marked]) == marked["url"]
+
+
+def test_equal_dimensions_last_wins():
+    first, second = _sized(f"{STUB}?a=1", 640, 640), _sized(f"{STUB}?a=2", 640, 640)
+    assert pick_photo_url([first, second]) == second["url"]
+
+
+@pytest.mark.parametrize(
+    ("width", "height"), [(None, 800), (800, None), (0, 800), (-1, 5), ("800", 800), (True, 800)]
+)
+def test_unusable_dimensions_fall_back_to_stp_rule(width, height):
+    """Положительный контроль к L10: непригодные `width/height` — прежнее правило по `stp`.
+    Непригодные только у одного варианта: если бы он «получил» площадь, он бы выиграл."""
+    unmarked = f"{STUB}?stp=dst-jpg_e35_tt6"
+    marked = f"{STUB}?stp=dst-jpg_e35_p1080x1080_tt6"
+    items = [_sized(marked, width, height), {"url": unmarked}]
+    assert pick_photo_url(items) == unmarked
+
+
+def test_thumbnails_without_dimensions_are_ignored_when_others_have_them():
+    sized = _sized(f"{STUB}?a=1", 100, 100)
+    plain = {"url": f"{STUB}?stp=dst-jpg_e35_tt6"}
+    assert pick_photo_url([sized, plain]) == sized["url"]
+
+
 def test_pick_photo_url_does_not_mutate_input():
     thumbs = copy.deepcopy(PHOTO["thumbnails"])
     pick_photo_url(thumbs)

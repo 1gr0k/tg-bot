@@ -1,13 +1,14 @@
 """ShortsDownloader на фикстуре и фейковом yt-dlp (решения 5, 9)."""
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
 from yt_dlp.utils import DownloadError as YtDownloadError
 
 from tests.fake_ytdlp import Script, load_fixture, probe_by_name
-from tg_bot.downloader.port import MediaKind, MediaNotFound, MediaTooLarge
+from tg_bot.downloader.port import DownloadFailed, MediaKind, MediaNotFound, MediaTooLarge
 from tg_bot.downloader.shorts import FORMAT_SORT, ShortsDownloader, caption_of
 from tg_bot.downloader.ytdlp import BUDGETS, SEND_LIMIT_BYTES, ThreadRunner
 from tg_bot.links import Link, Platform, PostKind
@@ -86,6 +87,23 @@ def test_file_skipped_by_max_filesize_counts_as_too_large(workdir):
     result = run_download(script, workdir)
     assert len(script.factory_calls) == 2
     assert result.items[0].path.stat().st_size == 2_000_000
+
+
+def test_missing_file_without_size_message_is_download_failed_not_retry(workdir):
+    """Точка 2: «файла нет» без сообщения yt-dlp о max_filesize — сбой, а не «слишком большой»:
+    следующий уровень бюджета не пробуется."""
+    script = Script(SHORTS, attempt_sizes=[SEND_LIMIT_BYTES + 1], silent_skip=True)
+    with pytest.raises(DownloadFailed) as caught:
+        run_download(script, workdir)
+    assert not isinstance(caught.value, MediaTooLarge)
+    assert len(script.factory_calls) == 1
+
+
+def test_size_message_is_logged_with_numbers(workdir, caplog):
+    script = Script(SHORTS, attempt_sizes=[SEND_LIMIT_BYTES + 1, 1_000_000])
+    with caplog.at_level(logging.INFO):
+        run_download(script, workdir)
+    assert str(SEND_LIMIT_BYTES + 1) in caplog.text
 
 
 def test_unavailable_video_is_not_found(workdir):

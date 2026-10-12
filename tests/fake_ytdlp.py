@@ -39,6 +39,7 @@ class Script:
         photo_error: BaseException | None = None,
         cookies_after: str | None = None,
         ignore_max_filesize: bool = False,
+        silent_skip: bool = False,
     ) -> None:
         self.info = info
         self.video_size = video_size
@@ -48,6 +49,8 @@ class Script:
         self.photo_error = photo_error
         self.cookies_after = cookies_after  # во что yt-dlp «перепишет» cookiefile при выходе
         self.ignore_max_filesize = ignore_max_filesize
+        # «файла нет» без сообщения о max_filesize (не «слишком большой», а сбой yt-dlp)
+        self.silent_skip = silent_skip
         self.factory_calls: list[dict[str, Any]] = []  # опции каждого создания YoutubeDL
         self.extract_calls: list[dict[str, Any]] = []
         self.process_calls: list[str] = []
@@ -98,6 +101,13 @@ class FakeYDL:
         path = self._target(entry_id)
         limit = self._options.get("max_filesize")
         if limit is not None and size > limit and not self._script.ignore_max_filesize:
+            logger = self._options.get("logger")
+            if logger is not None and not self._script.silent_skip:
+                # текст и канал — как у yt-dlp (проба 2026-10-13): `logger.debug`, ведущий `\r`
+                logger.debug(
+                    f"\r[download] File is larger than max-filesize ({size} bytes > {limit} bytes)."
+                    " Aborting."
+                )
             return None  # yt-dlp пропускает файл без ошибки (проба `max_filesize`)
         _sparse(path, size)
         return path

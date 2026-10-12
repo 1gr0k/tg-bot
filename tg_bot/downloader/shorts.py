@@ -19,6 +19,7 @@ from tg_bot.downloader.port import DownloadFailed, DownloadResult, MediaItem, Me
 from tg_bot.downloader.ytdlp import (
     Budget,
     ThreadRunner,
+    YdlLogger,
     base_options,
     fit_budget,
     probe_media,
@@ -65,7 +66,8 @@ class ShortsDownloader:
         infos: list[Any] = []
 
         def attempt(budget: Budget, subdir: Path) -> Path | None:
-            options = base_options(cancel) | {
+            logger = YdlLogger()
+            options = base_options(cancel, logger=logger) | {
                 "format": budget.selector,
                 "format_sort": FORMAT_SORT,
                 "merge_output_format": "mp4",
@@ -78,7 +80,11 @@ class ShortsDownloader:
             path = downloaded_path(info)
             if path is None:  # неизвестный путь — не «слишком большой»
                 raise DownloadFailed("yt-dlp не вернул путь скачанного файла")
-            return path if path.exists() else None  # нет файла = пропущен по `max_filesize`
+            if path.exists():
+                return path
+            if logger.take_size_exceeded():  # yt-dlp сообщил: файл больше max_filesize
+                return None
+            raise DownloadFailed("yt-dlp не создал файл и не сообщил, что файл больше max_filesize")
 
         with translating_errors():
             path = fit_budget(attempt, workdir, cancel)

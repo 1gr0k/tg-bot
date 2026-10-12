@@ -1,6 +1,7 @@
 """Бюджет размера (решение 9), опции yt-dlp (решение 8) и метаданные из ffprobe (решение 5)."""
 
 import json
+import logging
 import shutil
 import subprocess
 import threading
@@ -18,6 +19,7 @@ from tg_bot.downloader.ytdlp import (
     Budget,
     Cancelled,
     MediaProbe,
+    YdlLogger,
     base_options,
     ensure_fits,
     fit_budget,
@@ -181,6 +183,49 @@ def test_base_options_have_socket_timeout_hook_and_size_guard():
     cancel.set()
     with pytest.raises(Cancelled):
         options["progress_hooks"][0]({})  # хук связан именно с этим флагом
+
+
+_SKIP_MSG = "\r[download] File is larger than max-filesize (200000 bytes > 100000 bytes). Aborting."
+
+
+def test_logger_flags_max_filesize_message_once_and_logs_sizes(caplog):
+    """Точка 2: сообщение yt-dlp (проба) ставит флаг на попытку; размер — в лог."""
+    logger = YdlLogger()
+    assert logger.take_size_exceeded() is False
+    with caplog.at_level(logging.INFO, logger="tg_bot.downloader.ytdlp"):
+        logger.debug(_SKIP_MSG)
+    assert "200000" in caplog.text and "100000" in caplog.text
+    assert logger.take_size_exceeded() is True
+    assert logger.take_size_exceeded() is False  # флаг на одну попытку: считан — сброшен
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "[download] Destination: /tmp/x.mp4",
+        "[info] x: Downloading 1 format(s): mp4",
+        "[download] Download completed",
+        "File is larger than something else",
+        "",
+    ],
+)
+def test_logger_ignores_other_debug_messages(message):
+    logger = YdlLogger()
+    logger.debug(message)
+    assert logger.take_size_exceeded() is False
+
+
+def test_logger_warning_and_error_do_not_set_flag(caplog):
+    logger = YdlLogger()
+    logger.warning(_SKIP_MSG)
+    logger.error(_SKIP_MSG)
+    assert logger.take_size_exceeded() is False
+
+
+def test_base_options_use_given_logger():
+    logger = YdlLogger()
+    assert base_options(threading.Event(), logger=logger)["logger"] is logger
+    assert isinstance(base_options(threading.Event())["logger"], YdlLogger)
 
 
 def test_base_options_cookiefile_only_with_copy(tmp_path):

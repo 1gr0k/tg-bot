@@ -30,10 +30,16 @@ class MediaItem:
 class DownloadResult:
     items: tuple[MediaItem, ...]  # исходный порядок, не пусто
     caption: str = ""  # "" — описания нет
+    # Элементов публикации, которые не удалось скачать или которые не годятся (сверх лимита,
+    # без пригодных данных): они пропущены, остальные в `items`. «Не удалось N из M» — N = skipped,
+    # M = len(items) + skipped.
+    skipped: int = 0
 
     def __post_init__(self) -> None:
         if not self.items:
             raise ValueError("DownloadResult: items не может быть пустым")
+        if self.skipped < 0:
+            raise ValueError("DownloadResult: skipped не может быть отрицательным")
 
 
 class DownloadError(Exception):

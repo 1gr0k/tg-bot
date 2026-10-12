@@ -158,6 +158,7 @@ def test_unknown_entry_is_skipped_but_rest_is_delivered(workdir, caplog):
     with caplog.at_level(logging.WARNING):
         result = run_download(Script(info), MIXED_LINK, workdir)
     assert [i.kind for i in result.items] == [MediaKind.PHOTO, MediaKind.VIDEO]
+    assert result.skipped == 1  # неопознанный элемент — тоже не доставленный
     assert any("пропуск" in r.getMessage() for r in caplog.records)
 
 
@@ -165,6 +166,138 @@ def test_unknown_entry_is_skipped_but_rest_is_delivered(workdir, caplog):
 def test_nothing_usable_is_no_media(workdir, info):
     with pytest.raises(NoMedia):
         run_download(Script(info), REEL_LINK, workdir)
+
+
+# --- элементы карусели: пропуск неудавшихся и сверх лимита (M2) -------------------------------
+
+
+def _carousel(*videos: str) -> dict:
+    """Фото, затем видео с заданными id (по образцу видео-элемента смешанной карусели)."""
+    info = load_fixture("instagram_mixed_carousel")
+    photo, video = info["entries"]
+    info["entries"] = [photo]
+    for video_id in videos:
+        info["entries"].append(video | {"id": video_id})
+    return info
+
+
+OVER = SEND_LIMIT_BYTES + 1
+
+
+def test_one_of_three_over_limit_is_skipped_with_counter(workdir, caplog):
+    script = Script(
+        _carousel("VIDEO_OK", "VIDEO_BIG"), video_size={"VIDEO_OK": 1_000, "VIDEO_BIG": OVER}
+    )
+    with caplog.at_level(logging.WARNING):
+        result = run_download(script, MIXED_LINK, workdir)
+    assert [i.kind for i in result.items] == [MediaKind.PHOTO, MediaKind.VIDEO]
+    assert [i.path.name for i in result.items] == ["01_photo.jpg", "VIDEO_OK.mp4"]
+    assert result.skipped == 1
+    assert script.process_calls == ["VIDEO_OK", "VIDEO_BIG"]  # после пропуска идём дальше
+    assert any("элемент 3 из 3 пропущен" in r.getMessage() for r in caplog.records)
+
+
+def test_over_limit_file_written_by_ytdlp_is_removed(workdir):
+    script = Script(
+        _carousel("VIDEO_OK", "VIDEO_BIG"),
+        video_size={"VIDEO_OK": 1_000, "VIDEO_BIG": OVER},
+        ignore_max_filesize=True,
+    )
+    result = run_download(script, MIXED_LINK, workdir)
+    assert result.skipped == 1
+    assert not (workdir / "VIDEO_BIG.mp4").exists()  # большой файл не ждёт очистки каталога
+
+
+def test_all_over_limit_is_too_large(workdir):
+    script = Script(_carousel("A", "B"), video_size=OVER)
+    script.info["entries"].pop(0)  # только два видео
+    with pytest.raises(MediaTooLarge):
+        run_download(script, MIXED_LINK, workdir)
+    assert script.process_calls == ["A", "B"]  # попробованы оба, а не только первый
+
+
+def test_nothing_succeeded_raises_error_of_first_element(workdir):
+    """Фото упало (`DownloadFailed`), видео сверх лимита (`MediaTooLarge`) — наружу первая."""
+    script = Script(
+        _carousel("BIG"), video_size=OVER, photo_error=YtDownloadError("HTTP Error 403")
+    )
+    with pytest.raises(DownloadFailed):
+        run_download(script, MIXED_LINK, workdir)
+
+
+def test_failed_photo_is_skipped_video_is_delivered(workdir):
+    script = Script(_carousel("OK"), photo_error=YtDownloadError("HTTP Error 403"))
+    result = run_download(script, MIXED_LINK, workdir)
+    assert [i.kind for i in result.items] == [MediaKind.VIDEO]
+    assert result.skipped == 1
+
+
+def test_clean_carousel_has_zero_skipped(workdir):
+    assert run_download(Script(MIXED), MIXED_LINK, workdir).skipped == 0
+
+
+def test_cancel_during_carousel_is_not_swallowed_as_skip(workdir):
+    """`Cancelled` — не ошибка элемента: пропуском не становится."""
+    downloader = InstagramDownloader(
+        ThreadRunner(limit=1),
+        None,
+        ydl_factory=Script(_carousel("A")).factory,
+        probe=probe_by_name(),
+    )
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(Cancelled):
+        downloader._download_sync(MIXED_LINK, workdir, cancel)
+
+
+# --- Instagram без повтора по бюджету (M3) ----------------------------------------------------
+
+
+def test_oversize_video_is_not_retried_with_lower_budget(workdir):
+    """Решение 9: H.264 у Instagram только прогрессивный, ниже — DASH VP9 (отвергнут решением 5):
+    сверх лимита — сразу `MediaTooLarge`, одна загрузка, один набор опций."""
+    script = Script(REEL, video_size=OVER)
+    with pytest.raises(MediaTooLarge):
+        run_download(script, REEL_LINK, workdir)
+    assert script.process_calls == ["DeRrI8_BTZz"]
+    assert len(script.factory_calls) == 1
+
+
+# --- «файла нет»: слишком большой или сбой yt-dlp (точка 2) -----------------------------------
+
+
+def test_missing_file_with_size_message_is_too_large_and_size_is_logged(workdir, caplog):
+    script = Script(REEL, video_size=OVER)
+    with caplog.at_level(logging.INFO), pytest.raises(MediaTooLarge):
+        run_download(script, REEL_LINK, workdir)
+    assert str(OVER) in caplog.text  # размер из сообщения yt-dlp — в лог
+
+
+def test_missing_file_without_size_message_is_download_failed(workdir):
+    script = Script(REEL, video_size=OVER, silent_skip=True)
+    with pytest.raises(DownloadFailed) as caught:
+        run_download(script, REEL_LINK, workdir)
+    assert not isinstance(caught.value, MediaTooLarge)
+
+
+def test_size_message_of_previous_element_does_not_leak_to_next(workdir, caplog):
+    """Флаг — на элемент: сообщение первого (большого) не делает «слишком большим» второй, у
+    которого файла нет, а yt-dlp молчит."""
+    info = _carousel("BIG", "GONE")
+    info["entries"].pop(0)  # только два видео
+    script = Script(info, video_size=OVER)
+    original = script.size_for
+
+    def quiet_second(entry_id: str) -> int:
+        script.silent_skip = entry_id == "GONE"  # у второго yt-dlp молчит
+        return original(entry_id)
+
+    script.size_for = quiet_second  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING), pytest.raises(MediaTooLarge):  # первая ошибка — у BIG
+        run_download(script, MIXED_LINK, workdir)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("элемент 1 из 2 пропущен: MediaTooLarge" in m for m in messages)
+    assert any("элемент 2 из 2 пропущен: DownloadFailed" in m for m in messages)
 
 
 # --- фото: проверка размера картинки (решение 6) ---------------------------------------------
