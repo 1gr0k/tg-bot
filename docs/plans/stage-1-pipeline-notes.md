@@ -560,6 +560,46 @@ sleep: функция ждёт `threading.Event`, тест ждёт состоя
 исключения, **файла нет**, `requested_downloads` есть. Поэтому «файла нет» при заданном
 `max_filesize` трактуется как «слишком большой» (следующий уровень бюджета / `MediaTooLarge`).
 
+### `instagram.py` и `shorts.py` (`test_instagram_info.py` 54, `test_instagram_downloader.py` 27, `test_shorts_downloader.py` 17)
+
+Тесты разбора — на фикстурах `tests/fixtures/`; адаптеры — на фейковом `YoutubeDL`
+(`tests/fake_ytdlp.py`: пишет только в `outtmpl`, `max_filesize` молча пропускает файл, переписывает
+`cookiefile`). Решения реализации, которых не было в плане: описание Shorts — `description`, при
+пустом — `title`, иначе `""` (ТЗ 2.4: «название или описание, если доступно»); видео-элемент
+карусели больше лимита (или пропущенный по `max_filesize`) → `MediaTooLarge` на всю публикацию, а
+не тихая потеря элемента; несколько немаркированных вариантов фото — берётся последний.
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| I1 | пустой `formats` считается видео | `test_type_is_decided_by_response_not_by_link`, `test_classify_…[entry1-None]`, фото/карусель в `test_instagram_downloader` (6) |
+| I2 | первый немаркированный вместо последнего | `test_unmarked_beats_larger_marker_and_last_unmarked_wins` |
+| I3 | наименьший маркер вместо наибольшего | `test_without_unmarked_largest_marker_wins`, `test_largest_marker_by_area_not_by_position` ×3 |
+| I4 | немаркированный не в приоритете | `test_photo_original_is_the_unmarked_variant`, `…last_unmarked_wins`, `test_url_without_stp_…`, `test_photo_post_downloads_unmarked_original` |
+| I5 | `ignore_no_formats_error=False` | `test_options_follow_decisions` |
+| I6 | селектор Instagram изменён | `test_options_follow_decisions` (сравнение с литералом плана; с константой оно было тавтологией — исправлено) |
+| I7 | порог `<` → `<=` | `test_photo_with_exactly_min_short_side_has_no_warning` |
+| I8 | нет проверки короткой стороны | `test_small_photo_logs_warning_but_is_still_delivered` |
+| I9 | описание не берётся из элементов | `test_caption_from_top_level_and_from_entry` |
+| I10 | cookies не передаются yt-dlp | `test_ytdlp_gets_private_copy_source_is_untouched`, `test_parse_json_with_sessionid_removed_is_login_required` |
+| I11 | нет проверки факта размера видео | `test_video_over_limit_even_if_ytdlp_wrote_it_is_too_large` |
+| I12 | нет проверки «файла нет» (`max_filesize`) | `test_video_skipped_by_max_filesize_is_too_large` |
+| I13 | элементы в обратном порядке | `test_mixed_carousel_keeps_order_and_top_level_caption`, `test_unknown_entry_is_skipped_…` |
+| I14 | нет `NoMedia` | `test_nothing_usable_is_no_media` ×4 |
+| I15 | не-словари в `entries` не пропускаются | `test_non_dict_entries_are_skipped_with_log` |
+| I16 | маркер ищется во всём URL, а не в `stp` | `test_size_marker_is_read_only_from_stp_parameter` (**выжила на первой версии тестов** — тест добавлен) |
+| I17 | метаданные из info, а не из ffprobe | `test_metadata_comes_from_ffprobe_even_when_info_has_its_own` |
+| S1 | нет `merge_output_format` | `test_options_follow_decisions` |
+| S2 | нет `noplaylist` | `test_options_follow_decisions` |
+| S3 | `format_sort` изменён | `test_options_follow_decisions` |
+| S4 | нет запасного названия | `test_caption_description_then_title_then_empty` ×4 |
+| S5 | метаданные из ffprobe игнорируются | `test_one_video_item_with_metadata_and_caption` |
+| S6 | нет проверки «файла нет» | `test_fact_over_limit_retries_…`, `test_file_skipped_by_max_filesize_…`, `test_writes_only_inside_workdir` |
+| S7 | ошибки yt-dlp не переводятся | `test_unavailable_video_is_not_found` |
+| S8 | всегда первый уровень бюджета | `test_fact_over_limit_retries_with_next_budget_level` |
+
+Первые версии мутаций I9 и S8 были неверными (синтаксическая ошибка / `NameError` — тесты краснели
+не по делу); переписаны так, чтобы код оставался рабочим.
+
 ### `tests/test_scrub.py` (17 тестов зелёные)
 
 Находка при снятии фикстур (п. 3): у YouTube подпись, `ip` (IP машины) и `expire` лежат **в пути**
