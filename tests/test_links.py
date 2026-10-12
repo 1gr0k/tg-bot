@@ -40,6 +40,16 @@ POSITIVE = [
     ("HTTPS://WWW.Instagram.com/reel/" + CODE + "/", [reel(CODE)]),
     # идентификатор с дефисом и подчёркиванием не обрезается
     ("https://www.instagram.com/p/a-b_C-d_E12/", [post("a-b_C-d_E12")]),
+    # регистр пути: IGNORECASE
+    ("https://www.instagram.com/P/" + CODE + "/", [post(CODE)]),
+    ("https://www.instagram.com/Reel/" + CODE + "/", [reel(CODE)]),
+    ("https://www.instagram.com/REELS/" + CODE + "/", [reel(CODE)]),
+    # конец кода — по ASCII-классу: кириллица сразу за кодом не часть кода
+    ("https://www.instagram.com/reel/ABC123посмотри", [reel("ABC123")]),  # noqa: RUF001 — кириллица нужна намеренно
+    ("https://www.youtube.com/shorts/" + VID + "смотри", [short(VID)]),
+    # положительный контроль к предыдущему: `_` и `-` — часть кода
+    ("https://www.instagram.com/reel/ABC123_x", [reel("ABC123_x")]),
+    ("https://www.instagram.com/reel/ABC123-x", [reel("ABC123-x")]),
     # YouTube Shorts (ТЗ 2.3)
     ("https://www.youtube.com/shorts/" + VID, [short(VID)]),
     ("https://youtube.com/shorts/" + VID, [short(VID)]),
@@ -101,6 +111,13 @@ NEGATIVE = [
     "https://notyoutube.com/shorts/" + VID,
     "https://example.com/?u=instagram.com/reel/" + CODE,
     "https://example.com/instagram.com/reel/" + CODE,
+    # перед доменом `.`, `@`, `-`: поддомен, адрес с логином, часть слова
+    "https://x.instagram.com/reel/" + CODE,
+    "https://user@instagram.com/reel/" + CODE,
+    "https://my-instagram.com/reel/" + CODE,
+    "https://x.youtube.com/shorts/" + VID,
+    "https://user@youtube.com/shorts/" + VID,
+    "https://my-youtube.com/shorts/" + VID,
     # не-ссылки
     "",
     "   ",

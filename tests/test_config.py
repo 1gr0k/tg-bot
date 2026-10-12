@@ -97,6 +97,9 @@ def test_bad_owner_id(owner_id: str) -> None:
     message = str(excinfo.value)
     assert "OWNER_ID" in message
     assert "BOT_TOKEN" not in message
+    # Значение в текст ошибки не попадает (пустая строка входит в любую — её не проверяем).
+    if owner_id.strip():
+        assert owner_id.strip() not in message
 
 
 def test_missing_owner_id() -> None:
@@ -114,9 +117,9 @@ def test_nothing_set() -> None:
 
 def test_token_is_not_in_repr_or_str() -> None:
     settings = load_settings(env())
-    for text in (repr(settings), str(settings), f"{settings!r}", f"{settings}"):
-        assert _BODY not in text
-        assert TOKEN not in text
+    for text in (repr(settings), str(settings)):
+        assert _BODY not in text  # TOKEN содержит _BODY: отдельная проверка TOKEN избыточна
+        assert _ID not in text
     assert "owner_id=" in repr(settings)  # положительный контроль: repr остальные поля показывает
 
 
@@ -124,9 +127,11 @@ def test_token_is_not_in_error_with_cookies_problem(tmp_path: Path) -> None:
     missing = tmp_path / "нет-такого-файла.txt"
     with pytest.raises(ConfigError) as excinfo:
         load_settings(env(IG_COOKIES_FILE=str(missing)))
-    assert "IG_COOKIES_FILE" in str(excinfo.value)
-    assert _BODY not in str(excinfo.value)
-    assert TOKEN not in repr(excinfo.value)
+    message = str(excinfo.value)
+    assert "IG_COOKIES_FILE" in message
+    # Токен уже проверен к этому моменту (он в окружении): ошибка про cookies не должна его нести.
+    assert _BODY not in message
+    assert _ID not in message
 
 
 def test_token_is_not_in_log(caplog: pytest.LogCaptureFixture, tmp_path: Path) -> None:

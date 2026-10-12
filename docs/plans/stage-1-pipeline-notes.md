@@ -481,6 +481,35 @@ _Часть B: читатели info dict yt-dlp; часть C: читатели
 совпавшего текста вместо `&`) появилась в bash 5.2, а bash 5 на машине нет. Кейс выходит красным
 только на bash ≥ 5.2 без исправления — на CI (`ubuntu-latest`, bash 5.2).
 
+**`tests/test_links.py`** (72 теста, было 59) — мутации на копии дерева:
+
+| # | Мутация в `tg_bot/links.py` | Упавшие тесты |
+|---|---|---|
+| 1 | `_END` снова по `\w` | `test_positive[…/reel/ABC123посмотри]`, `[…/shorts/<11>смотри]` |
+| 2 | из lookbehind убрана `.` | `test_negative[https://x.instagram.com/…]`, `[https://x.youtube.com/…]` |
+| 3 | из lookbehind убрана `@` | `test_negative[https://user@instagram.com/…]`, `[https://user@youtube.com/…]` |
+| 4 | из lookbehind убрано `-` | `test_negative[https://my-instagram.com/…]`, `[https://my-youtube.com/…]` |
+| 5 | тип по пути без `.lower()` | `test_positive[…/P/<код>/]` |
+
+Положительный контроль к L8: `…/reel/ABC123_x` и `…/reel/ABC123-x` находятся целиком.
+
+**`tests/test_config.py`** (114 всего; было 42 в config) — мутации:
+
+| # | Мутация в `tg_bot/config.py` | Упавшие тесты |
+|---|---|---|
+| 10 | значение `OWNER_ID` добавлено в текст ошибки | `test_bad_owner_id` — 9 строк таблицы (кроме пустой) |
+| 11 | токен добавлен в текст ошибки про cookies | `test_token_is_not_in_error_with_cookies_problem` |
+| 12 | токен добавлен в предупреждение о правах cookies (лог) | `test_token_is_not_in_log` |
+| 13 | `environ` целиком пишется в лог `DEBUG` | `test_token_is_not_in_log`, `test_cookies_file_ok` |
+| 14 | у `bot_token` убран `repr=False` (повтор №1 после правки теста) | `test_token_is_not_in_repr_or_str` |
+
+L10: теста, который не мог бы упасть вовсе, найти не удалось — в замечании тест не назван. Нашлись
+избыточные проверки: четыре одинаковые строки в `test_token_is_not_in_repr_or_str` (repr, str и
+два f-формата дают одно и то же), `TOKEN not in …` после `_BODY not in …` (TOKEN содержит _BODY) и
+`TOKEN not in repr(excinfo.value)` в тесте про cookies. Они убраны; вместо них — `_ID`. Тесты
+«токен не в ошибке/логе» в таблице зубов раньше не падали ни от одной мутации (кроме `repr=False`
+и общей про предупреждение) — теперь падают от мутаций 11–13.
+
 ## Зубы: часть B
 
 ## Зубы: часть C
