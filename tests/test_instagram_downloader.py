@@ -17,6 +17,7 @@ from tg_bot.downloader.port import (
     MediaKind,
     MediaTooLarge,
     NoMedia,
+    RateLimited,
 )
 from tg_bot.downloader.ytdlp import (
     SEND_LIMIT_BYTES,
@@ -451,3 +452,179 @@ def test_nothing_is_written_outside_workdir(tmp_path, cookies_source):
     run_download(Script(MIXED), MIXED_LINK, workdir, cookies_file=cookies_source)
     new = {p for p in tmp_path.rglob("*") if p.is_file()} - before
     assert new and all(workdir in p.parents for p in new)
+
+
+# --- сигнал владельцу `owner_alert` (решение 7, «изменено по ревью части B (2)») ---------------
+
+
+class _TooManyRequests(YtDownloadError):
+    status = 429
+
+
+def _videos(*ids: str) -> dict:
+    """Карусель только из видео с заданными id."""
+    info = _carousel(*ids)
+    info["entries"].pop(0)  # без фото
+    return info
+
+
+SESSION_LOST = _cookies("csrftoken", "mid")  # yt-dlp при `close()` убрал `sessionid`
+SESSION_KEPT = _cookies("csrftoken", "sessionid", "mid")
+_PARSE_FAIL = YtDownloadError(_PARSE_JSON)
+
+
+def test_session_lost_and_no_element_succeeded_is_login_required(workdir, cookies_source):
+    """Проверка `session_lost()` — после выхода из `with ydl`: до `close()` файл ещё цел."""
+    script = Script(
+        _videos("A", "B"),
+        entry_errors={"A": _PARSE_FAIL, "B": _PARSE_FAIL},
+        cookies_after=SESSION_LOST,
+    )
+    with pytest.raises(LoginRequired):
+        run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    assert script.process_calls == ["A", "B"]  # оба элемента попробованы
+
+
+def _fresh_workdir(tmp_path: Path, name: str) -> Path:
+    """Отдельный каталог загрузки: в занятом `cookies.txt` копия не создаётся (O_EXCL)."""
+    path = tmp_path / name
+    path.mkdir()
+    return path
+
+
+def test_session_lost_and_elements_failed_for_other_reasons_is_login_required(
+    workdir, tmp_path, cookies_source
+):
+    """Потеря сессии важнее причины элементов: ни один не удался по постороннему тексту."""
+    boom = YtDownloadError("ERROR: boom")
+    script = Script(
+        _videos("A", "B"), entry_errors={"A": boom, "B": boom}, cookies_after=SESSION_LOST
+    )
+    with pytest.raises(LoginRequired):
+        run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    kept = Script(
+        _videos("A", "B"), entry_errors={"A": boom, "B": boom}, cookies_after=SESSION_KEPT
+    )
+    with pytest.raises(DownloadFailed):  # положительный контроль: сессия на месте
+        run_download(
+            kept, MIXED_LINK, _fresh_workdir(tmp_path, "kept"), cookies_file=cookies_source
+        )
+
+
+def test_session_lost_and_nothing_usable_is_login_required(workdir, tmp_path, cookies_source):
+    info = {"id": "X", "entries": [{"id": "weird"}]}
+    with pytest.raises(LoginRequired):
+        run_download(
+            Script(info, cookies_after=SESSION_LOST),
+            MIXED_LINK,
+            workdir,
+            cookies_file=cookies_source,
+        )
+    with pytest.raises(NoMedia):  # положительный контроль: сессия на месте
+        run_download(
+            Script(info, cookies_after=SESSION_KEPT),
+            MIXED_LINK,
+            _fresh_workdir(tmp_path, "kept"),
+            cookies_file=cookies_source,
+        )
+
+
+def test_session_kept_and_no_element_succeeded_is_download_failed(workdir, cookies_source):
+    """Положительный контроль к предыдущему: `sessionid` на месте — прежняя причина первого."""
+    script = Script(
+        _videos("A", "B"),
+        entry_errors={"A": _PARSE_FAIL, "B": _PARSE_FAIL},
+        cookies_after=SESSION_KEPT,
+    )
+    with pytest.raises(DownloadFailed):
+        run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+
+
+def test_session_lost_with_one_of_two_gives_owner_alert(workdir, cookies_source):
+    script = Script(_videos("A", "B"), entry_errors={"A": _PARSE_FAIL}, cookies_after=SESSION_LOST)
+    result = run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    assert [i.path.name for i in result.items] == ["B.mp4"]
+    assert result.skipped == 1
+    assert result.owner_alert is LoginRequired
+
+
+def test_session_lost_without_failed_elements_still_gives_owner_alert(workdir, cookies_source):
+    script = Script(MIXED, cookies_after=SESSION_LOST)
+    result = run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    assert result.skipped == 0 and result.owner_alert is LoginRequired
+
+
+def test_session_kept_gives_no_owner_alert_even_with_failed_element(workdir, cookies_source):
+    """Положительный контроль: та же ошибка элемента, `sessionid` на месте — сигнала нет."""
+    script = Script(_videos("A", "B"), entry_errors={"A": _PARSE_FAIL}, cookies_after=SESSION_KEPT)
+    result = run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    assert result.skipped == 1 and result.owner_alert is None
+
+
+def test_clean_download_has_no_owner_alert(workdir, cookies_source):
+    for script, cookies_file in [
+        (Script(MIXED), None),
+        (Script(MIXED, cookies_after=SESSION_KEPT), cookies_source),
+    ]:
+        assert (
+            run_download(script, MIXED_LINK, workdir, cookies_file=cookies_file).owner_alert is None
+        )
+
+
+def test_rate_limited_element_gives_owner_alert_when_others_succeed(workdir):
+    script = Script(_videos("A", "B"), entry_errors={"A": _TooManyRequests("HTTP Error 429")})
+    result = run_download(script, MIXED_LINK, workdir)
+    assert [i.path.name for i in result.items] == ["B.mp4"]
+    assert result.skipped == 1 and result.owner_alert is RateLimited
+
+
+def test_login_required_element_gives_owner_alert_when_others_succeed(workdir):
+    script = Script(_videos("A", "B"), entry_errors={"A": YtDownloadError(_EMPTY)})
+    result = run_download(script, MIXED_LINK, workdir)
+    assert result.skipped == 1 and result.owner_alert is LoginRequired
+
+
+def test_other_element_errors_give_no_owner_alert(workdir):
+    script = Script(
+        _carousel("OK", "BIG"), video_size={"OK": 1_000, "BIG": OVER}, photo_error=_PARSE_FAIL
+    )
+    result = run_download(script, MIXED_LINK, workdir)
+    assert result.skipped == 2 and result.owner_alert is None  # `DownloadFailed`, `MediaTooLarge`
+
+
+# --- ошибка элемента: одна запись в лог, неожиданная форма данных — пропуск (L) ---------------
+
+
+def test_failed_element_is_logged_once(workdir, caplog):
+    script = Script(_videos("A", "B"), entry_errors={"A": YtDownloadError("ERROR: boom")})
+    with caplog.at_level(logging.DEBUG):
+        run_download(script, MIXED_LINK, workdir)
+    about_a = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(about_a) == 1 and "элемент 1 из 2 пропущен" in about_a[0].getMessage()
+
+
+def test_single_failed_reel_is_logged_once(workdir, caplog):
+    script = Script(REEL, entry_errors={"DeRrI8_BTZz": YtDownloadError("ERROR: boom")})
+    with caplog.at_level(logging.DEBUG), pytest.raises(DownloadFailed):
+        run_download(script, REEL_LINK, workdir)
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [KeyError("formats"), TypeError("NoneType"), ValueError("bad int")],
+    ids=["KeyError", "TypeError", "ValueError"],
+)
+def test_unexpected_data_error_on_one_element_is_a_skip_not_an_abort(workdir, caplog, error):
+    script = Script(_videos("A", "B"), entry_errors={"A": error})
+    with caplog.at_level(logging.WARNING):
+        result = run_download(script, MIXED_LINK, workdir)
+    assert [i.path.name for i in result.items] == ["B.mp4"]
+    assert result.skipped == 1 and result.owner_alert is None
+    assert any("элемент 1 из 2 пропущен" in r.getMessage() for r in caplog.records)
+
+
+def test_unexpected_data_error_on_all_elements_is_download_failed(workdir):
+    script = Script(_videos("A"), entry_errors={"A": TypeError("NoneType")})
+    with pytest.raises(DownloadFailed):
+        run_download(script, MIXED_LINK, workdir)

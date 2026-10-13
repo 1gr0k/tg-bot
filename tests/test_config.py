@@ -233,6 +233,36 @@ def test_cookies_file_valid_formats_pass(tmp_path: Path, text: str) -> None:
     assert load_settings(env(IG_COOKIES_FILE=str(cookies))).ig_cookies_file == cookies
 
 
+# Таблица «поле expires → принимает ли yt-dlp» — по коду, не по памяти: yt-dlp 2026.8.19,
+# yt_dlp/cookies.py:1372 (`YoutubeDLCookieJar.load`): `if cookie.expires_at and not
+# re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', cookie.expires_at): raise LoadError` — строка отбрасывается
+# с предупреждением. Пустое значение (сессионный cookie) принимается; `config` — ровно так же.
+EXPIRES_VS_YTDLP = [
+    pytest.param("", True, id="пусто — сессионный cookie"),
+    pytest.param("0", True, id="ноль"),
+    pytest.param("1999999999", True, id="цифры"),
+    pytest.param("1999999999.5", True, id="дробное"),
+    pytest.param("abc", False, id="не число"),
+    pytest.param("-1", False, id="отрицательное"),
+    pytest.param("1.", False, id="точка без дробной части"),
+    pytest.param(".5", False, id="нет целой части"),
+    pytest.param("1e9", False, id="экспонента"),
+    pytest.param(" ", False, id="пробел (непусто)"),
+]
+
+
+@pytest.mark.parametrize(("expires", "accepted"), EXPIRES_VS_YTDLP)
+def test_cookies_expires_follows_ytdlp_rule(tmp_path: Path, expires: str, accepted: bool) -> None:
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text(f"{_fields(n=7, expires=expires)}\n", encoding="utf-8")
+    cookies.chmod(0o600)
+    if accepted:
+        assert load_settings(env(IG_COOKIES_FILE=str(cookies))).ig_cookies_file == cookies
+    else:
+        with pytest.raises(ConfigError, match="expires"):
+            load_settings(env(IG_COOKIES_FILE=str(cookies)))
+
+
 BAD_COOKIES_FILES = [
     pytest.param(f"# c\n\n{_fields(n=6)}\n", 3, "7 полей", id="шесть полей"),
     pytest.param(f"{_GOOD}\n{_fields(n=8)}\n", 2, "7 полей", id="восемь полей"),
@@ -243,11 +273,13 @@ BAD_COOKIES_FILES = [
         "7 полей",
         id="пробелы вместо табуляции",
     ),
-    pytest.param(f"{_GOOD}\n{_fields(expires='')}\n", 2, "expires", id="expires пуст"),
     pytest.param(f"{_fields(expires='abc')}\n", 1, "expires", id="expires — буквы"),
     pytest.param(f"{_fields(expires='-1')}\n", 1, "expires", id="expires отрицательный"),
-    pytest.param(f"{_fields(expires='1.5')}\n", 1, "expires", id="expires дробный"),
     pytest.param(f"{_fields(expires='12a')}\n", 1, "expires", id="expires: цифры и буква"),
+    pytest.param(f"{_fields(expires='1.')}\n", 1, "expires", id="expires: точка без дробной части"),
+    pytest.param(f"{_fields(expires='.5')}\n", 1, "expires", id="expires: нет целой части"),
+    pytest.param(f"{_fields(expires='1.2.3')}\n", 1, "expires", id="expires: две точки"),
+    pytest.param(f"{_fields(expires=' ')}\n", 1, "expires", id="expires: пробел (непусто)"),
     pytest.param(
         f"{_GOOD}\r\n{_HTTP_ONLY}\r\n{_fields(n=6)}\r\n", 3, "7 полей", id="CRLF, строка 3"
     ),

@@ -9,10 +9,12 @@ from tg_bot.downloader import port
 from tg_bot.downloader.port import (
     DownloadError,
     DownloadFailed,
+    LoginRequired,
     MediaKind,
     MediaNotFound,
     MediaTooLarge,
     NoMedia,
+    RateLimited,
 )
 from tg_bot.downloader.ytdlp import SEND_LIMIT_BYTES
 from tg_bot.links import Link, Platform, PostKind
@@ -77,10 +79,72 @@ def test_empty_result_is_no_media(workdir):
 @pytest.mark.parametrize(
     "media", [video(size=SEND_LIMIT_BYTES + 1), photo(size=SEND_LIMIT_BYTES + 1)]
 )
-def test_oversize_is_too_large_and_nothing_is_written(workdir, media):
+def test_all_oversize_is_too_large_and_nothing_is_written(workdir, media):
     with pytest.raises(MediaTooLarge):
-        download(FakeDownloader([photo("ok.jpg"), media]), workdir)
+        download(FakeDownloader([media, media]), workdir)
     assert list(workdir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "media", [video("big.mp4", SEND_LIMIT_BYTES + 1), photo("big.jpg", SEND_LIMIT_BYTES + 1)]
+)
+def test_oversize_element_is_skipped_and_counted(workdir, media):
+    result = download(FakeDownloader([photo("ok.jpg"), media]), workdir)
+    assert [i.path.name for i in result.items] == ["ok.jpg"]
+    assert result.skipped == 1 and result.owner_alert is None
+    assert [p.name for p in workdir.iterdir()] == ["ok.jpg"]  # пропущенный не записан
+
+
+def test_failed_elements_are_skipped_in_order_and_counted(workdir):
+    fake = FakeDownloader(
+        [
+            video("1.mp4", error=DownloadFailed("x")),
+            photo("2.jpg"),
+            video("3.mp4"),
+            photo("4.jpg", error=MediaNotFound("y")),
+        ]
+    )
+    result = download(fake, workdir)
+    assert [i.path.name for i in result.items] == ["2.jpg", "3.mp4"]
+    assert result.skipped == 2 and result.owner_alert is None
+
+
+def test_nothing_succeeded_raises_error_of_first_element(workdir):
+    fake = FakeDownloader(
+        [
+            video("1.mp4", error=DownloadFailed("первая")),
+            video("2.mp4", error=MediaNotFound("вторая")),
+        ]
+    )
+    with pytest.raises(DownloadFailed, match="первая"):
+        download(fake, workdir)
+    assert list(workdir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(RateLimited("429"), RateLimited), (LoginRequired("вход"), LoginRequired)],
+)
+def test_owner_alert_from_failed_element_while_others_succeed(workdir, error, expected):
+    result = download(FakeDownloader([video("1.mp4", error=error), photo("2.jpg")]), workdir)
+    assert result.skipped == 1 and result.owner_alert is expected
+
+
+def test_session_lost_gives_owner_alert_and_login_required_when_nothing_succeeded(workdir):
+    partial = FakeDownloader(
+        [video("1.mp4", error=DownloadFailed("x")), photo("2.jpg")], session_lost=True
+    )
+    assert download(partial, workdir).owner_alert is LoginRequired
+    none_left = FakeDownloader([video("1.mp4", error=DownloadFailed("x"))], session_lost=True)
+    with pytest.raises(LoginRequired):
+        download(none_left, workdir)
+    kept = FakeDownloader([video("1.mp4", error=DownloadFailed("x")), photo("2.jpg")])
+    assert download(kept, workdir).owner_alert is None  # положительный контроль
+
+
+def test_media_error_must_be_port_error():
+    with pytest.raises(TypeError):
+        video(error=RuntimeError("x"))  # type: ignore[arg-type]
 
 
 def test_exactly_at_limit_is_accepted(workdir):

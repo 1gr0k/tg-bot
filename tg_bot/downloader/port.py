@@ -4,6 +4,7 @@
 принадлежит вызывающему (решение 3): загрузчик пишет только внутрь переданного `workdir`.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -34,12 +35,19 @@ class DownloadResult:
     # без пригодных данных): они пропущены, остальные в `items`. «Не удалось N из M» — N = skipped,
     # M = len(items) + skipped.
     skipped: int = 0
+    # Причина, о которой нужно сообщить владельцу, даже когда загрузка удалась (решение 7):
+    # `LoginRequired` — сессия cookies потеряна или элемент упал из-за входа; `RateLimited` —
+    # элемент упал по лимиту запросов; `None` — сигнала нет. Пользователю не показывается;
+    # уведомление владельцу по этому полю — часть C.
+    owner_alert: "type[DownloadError] | None" = None
 
     def __post_init__(self) -> None:
         if not self.items:
             raise ValueError("DownloadResult: items не может быть пустым")
         if self.skipped < 0:
             raise ValueError("DownloadResult: skipped не может быть отрицательным")
+        if self.owner_alert not in (None, LoginRequired, RateLimited):
+            raise ValueError("DownloadResult: owner_alert — LoginRequired, RateLimited или None")
 
 
 class DownloadError(Exception):
@@ -86,6 +94,17 @@ class DownloadFailed(DownloadError):
     """Прочее, в том числе ошибка FFmpeg и незнакомая ошибка yt-dlp."""
 
     user_message = "Скачать не удалось."
+
+
+def owner_alert_of(
+    errors: Iterable[DownloadError], *, session_lost: bool
+) -> "type[DownloadError] | None":
+    """Сигнал владельцу по ошибкам пропущенных элементов: потеря сессии или `LoginRequired`
+    важнее `RateLimited`; прочие ошибки сигнала не дают."""
+    kinds = {type(error) for error in errors}
+    if session_lost or LoginRequired in kinds:
+        return LoginRequired
+    return RateLimited if RateLimited in kinds else None
 
 
 class Downloader(Protocol):

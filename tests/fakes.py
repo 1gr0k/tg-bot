@@ -2,8 +2,11 @@
 
 `FakeDownloader` ведёт себя как реальные адаптеры (`InstagramDownloader`, `ShortsDownloader`):
 те же типы ошибок (только наследники `DownloadError`), элементы в заданном порядке, файлы — только
-внутри переданного `workdir`, видео больше лимита Telegram — `MediaTooLarge`, пустой результат —
-`NoMedia`. Контракт общий с реальными адаптерами проверяет `tests/test_downloader_contract.py`.
+внутри переданного `workdir`, пустой результат — `NoMedia`. Элемент больше лимита Telegram или с
+`error` пропускается и считается в `skipped`; `owner_alert` ставится по тем же правилам, что у
+`InstagramDownloader` (`owner_alert_of`; `session_lost=True` — сессия cookies потеряна); не удался
+ни один — ошибка первого (при потере сессии — `LoginRequired`). Контракт общий с реальными
+адаптерами проверяет `tests/test_downloader_contract.py`.
 
 Два отличия от реальных: ошибка выбрасывается **до** записи файлов (реальный адаптер может оставить
 в `workdir` копию cookies и частичные файлы — очистка каталога обязана с этим справляться), и
@@ -19,10 +22,12 @@ from tg_bot.downloader.port import (
     DownloadError,
     DownloadFailed,
     DownloadResult,
+    LoginRequired,
     MediaItem,
     MediaKind,
     MediaTooLarge,
     NoMedia,
+    owner_alert_of,
 )
 from tg_bot.downloader.ytdlp import SEND_LIMIT_BYTES
 from tg_bot.links import Link
@@ -36,16 +41,34 @@ class FakeMedia:
     width: int | None = None
     height: int | None = None
     duration: float | None = None
+    error: DownloadError | None = None  # элемент не скачался: пропускается, как у адаптера
+
+    def __post_init__(self) -> None:
+        if self.error is not None and not isinstance(self.error, DownloadError):
+            raise TypeError("FakeMedia: ошибка должна быть наследником DownloadError")
 
 
 def video(
-    name: str = "v.mp4", size: int = 1_000, *, width=720, height=1280, duration=10.0
+    name: str = "v.mp4",
+    size: int = 1_000,
+    *,
+    width=720,
+    height=1280,
+    duration=10.0,
+    error: DownloadError | None = None,
 ) -> FakeMedia:
-    return FakeMedia(MediaKind.VIDEO, name, size, width, height, duration)
+    return FakeMedia(MediaKind.VIDEO, name, size, width, height, duration, error)
 
 
-def photo(name: str = "p.jpg", size: int = 1_000, *, width=1080, height=1350) -> FakeMedia:
-    return FakeMedia(MediaKind.PHOTO, name, size, width, height)
+def photo(
+    name: str = "p.jpg",
+    size: int = 1_000,
+    *,
+    width=1080,
+    height=1350,
+    error: DownloadError | None = None,
+) -> FakeMedia:
+    return FakeMedia(MediaKind.PHOTO, name, size, width, height, error=error)
 
 
 class FakeDownloader:
@@ -56,9 +79,11 @@ class FakeDownloader:
         error: DownloadError | None = None,
         *,
         gate: asyncio.Event | None = None,
+        session_lost: bool = False,
     ) -> None:
         if error is not None and not isinstance(error, DownloadError):
             raise TypeError("FakeDownloader: ошибка должна быть наследником DownloadError")
+        self._session_lost = session_lost  # yt-dlp при `close()` убрал `sessionid` из cookies
         self._items = tuple(items)
         self._caption = caption
         self._error = error
@@ -86,15 +111,31 @@ class FakeDownloader:
             raise DownloadFailed(f"каталог загрузки не существует: {workdir.name}")
         if not self._items:
             raise NoMedia("в публикации нет ни фото, ни видео")
+        kept: list[FakeMedia] = []
+        errors: list[DownloadError] = []
         for media in self._items:
-            if media.size > SEND_LIMIT_BYTES:  # как `ensure_fits` в адаптерах: и видео, и фото
-                raise MediaTooLarge(f"{media.name}: {media.size} байт больше лимита")
-        paths = [self._write(workdir, media) for media in self._items]
+            if media.error is not None:
+                errors.append(media.error)
+            elif media.size > SEND_LIMIT_BYTES:  # как `ensure_fits` в адаптерах: и видео, и фото
+                errors.append(MediaTooLarge(f"{media.name}: {media.size} байт больше лимита"))
+            else:
+                kept.append(media)
+        if not kept:  # ни один не удался: как адаптер — причина первого, но потеря сессии важнее
+            first = errors[0]
+            if self._session_lost and not isinstance(first, LoginRequired):
+                raise LoginRequired("сессия cookies потеряна") from first
+            raise first
+        paths = [self._write(workdir, media) for media in kept]
         items = tuple(
             MediaItem(m.kind, path, m.width, m.height, m.duration)
-            for m, path in zip(self._items, paths, strict=True)
+            for m, path in zip(kept, paths, strict=True)
         )
-        return DownloadResult(items=items, caption=self._caption)
+        return DownloadResult(
+            items=items,
+            caption=self._caption,
+            skipped=len(errors),
+            owner_alert=owner_alert_of(errors, session_lost=self._session_lost),
+        )
 
     @staticmethod
     def _write(workdir: Path, media: FakeMedia) -> Path:

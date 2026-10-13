@@ -19,15 +19,18 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import yt_dlp
+from yt_dlp.utils import YoutubeDLError
 
 from tg_bot.downloader.port import (
     DownloadError,
     DownloadFailed,
     DownloadResult,
+    LoginRequired,
     MediaItem,
     MediaKind,
     MediaTooLarge,
     NoMedia,
+    owner_alert_of,
 )
 from tg_bot.downloader.ytdlp import (
     SEND_LIMIT_BYTES,
@@ -36,8 +39,10 @@ from tg_bot.downloader.ytdlp import (
     YdlLogger,
     base_options,
     copy_cookies,
+    describe,
     ensure_fits,
     probe_media,
+    translate_error,
     translating_errors,
 )
 from tg_bot.links import Link
@@ -52,6 +57,10 @@ MIN_PHOTO_SIDE = 600
 # Не больше 5 цифр: гигантское число в чужом URL не должно ронять `int()`.
 _SIZE_MARKER = re.compile(r"(?:^|_)[ps](\d{1,5})x(\d{1,5})(?:_|$)")
 _PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+
+# Что пропускает один элемент карусели (остальные продолжаются): ошибки порта, yt-dlp и файлов,
+# а также «неожиданная форма» данных (терпимый читатель). `Cancelled` — отмена, не ошибка элемента.
+_ELEMENT_ERRORS = (DownloadError, YoutubeDLError, OSError, KeyError, TypeError, ValueError)
 
 type YdlFactory = Callable[[dict[str, Any]], AbstractContextManager[Any]]
 type Probe = Callable[[Path], Any]
@@ -210,44 +219,54 @@ class InstagramDownloader:
                 "format": FORMAT_SELECTOR,
                 "outtmpl": str(workdir / "%(id)s.%(ext)s"),
             }
+            items: list[MediaItem] = []
+            failures: list[BaseException] = []
+            skipped = 0
             with self._ydl_factory(options) as ydl:
                 info = ydl.extract_info(link.url, download=False, process=False)
                 entries = entries_of(info)
-                items: list[MediaItem] = []
-                errors: list[DownloadError] = []
-                skipped = 0
                 for position, entry in enumerate(entries, start=1):
-                    try:
-                        with translating_errors(cookies):  # ошибка элемента — только его
-                            item = self._fetch_entry(ydl, entry, position, workdir, cancel, logger)
-                    except DownloadError as exc:
+                    try:  # ошибка элемента — только его; перевод — после выхода из `with ydl`
+                        item = self._fetch_entry(ydl, entry, position, workdir, cancel, logger)
+                    except _ELEMENT_ERRORS as exc:
                         log.warning(
-                            "элемент %d из %d пропущен: %s: %s",
-                            position,
-                            len(entries),
-                            type(exc).__name__,
-                            exc,
+                            "элемент %d из %d пропущен: %s", position, len(entries), describe(exc)
                         )
-                        errors.append(exc)
+                        failures.append(exc)
                         skipped += 1
                         continue
                     if item is None:
                         skipped += 1
                     else:
                         items.append(item)
+            # `ydl` закрыт: yt-dlp пишет `cookiefile` только в `close()` (решение 7), поэтому
+            # потерю сессии можно проверять только здесь, а не при обработке элемента.
+            lost = cookies is not None and cookies.session_lost()
+            # Потеря сессии учитывается ниже явно (`LoginRequired`, `owner_alert`), поэтому перевод
+            # ошибки элемента от `lost` не зависит.
+            errors = [
+                exc if isinstance(exc, DownloadError) else translate_error(exc) for exc in failures
+            ]
             if not items:
-                if errors:  # ни один элемент не удался — причина первого
-                    raise errors[0]
+                first = errors[0] if errors else None
+                if lost and not isinstance(first, LoginRequired):
+                    raise LoginRequired(describe(first) if first else "сессия cookies потеряна")
+                if first is not None:  # ни один элемент не удался — причина первого
+                    raise first
                 raise NoMedia("в публикации нет ни фото, ни видео")
+            alert = owner_alert_of(errors, session_lost=lost)
             log.info(
-                "instagram %s (%s): %d элем. [%s], пропущено %d",
+                "instagram %s (%s): %d элем. [%s], пропущено %d, сигнал владельцу: %s",
                 link.media_id,
                 link.kind,
                 len(items),
                 ", ".join(i.kind for i in items),
                 skipped,
+                alert.__name__ if alert else "нет",
             )
-            return DownloadResult(items=tuple(items), caption=caption_of(info), skipped=skipped)
+            return DownloadResult(
+                items=tuple(items), caption=caption_of(info), skipped=skipped, owner_alert=alert
+            )
 
     def _fetch_entry(
         self,
