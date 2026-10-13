@@ -242,9 +242,10 @@ class InstagramDownloader:
             # `ydl` закрыт: yt-dlp пишет `cookiefile` только в `close()` (решение 7), поэтому
             # потерю сессии можно проверять только здесь, а не при обработке элемента.
             lost = cookies is not None and cookies.session_lost()
+            # Потеря сессии учитывается ниже явно (`LoginRequired`, `owner_alert`), поэтому перевод
+            # ошибки элемента от `lost` не зависит.
             errors = [
-                exc if isinstance(exc, DownloadError) else translate_error(exc, session_lost=lost)
-                for exc in failures
+                exc if isinstance(exc, DownloadError) else translate_error(exc) for exc in failures
             ]
             if not items:
                 first = errors[0] if errors else None

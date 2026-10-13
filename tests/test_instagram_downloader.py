@@ -485,6 +485,50 @@ def test_session_lost_and_no_element_succeeded_is_login_required(workdir, cookie
     assert script.process_calls == ["A", "B"]  # оба элемента попробованы
 
 
+def _fresh_workdir(tmp_path: Path, name: str) -> Path:
+    """Отдельный каталог загрузки: в занятом `cookies.txt` копия не создаётся (O_EXCL)."""
+    path = tmp_path / name
+    path.mkdir()
+    return path
+
+
+def test_session_lost_and_elements_failed_for_other_reasons_is_login_required(
+    workdir, tmp_path, cookies_source
+):
+    """Потеря сессии важнее причины элементов: ни один не удался по постороннему тексту."""
+    boom = YtDownloadError("ERROR: boom")
+    script = Script(
+        _videos("A", "B"), entry_errors={"A": boom, "B": boom}, cookies_after=SESSION_LOST
+    )
+    with pytest.raises(LoginRequired):
+        run_download(script, MIXED_LINK, workdir, cookies_file=cookies_source)
+    kept = Script(
+        _videos("A", "B"), entry_errors={"A": boom, "B": boom}, cookies_after=SESSION_KEPT
+    )
+    with pytest.raises(DownloadFailed):  # положительный контроль: сессия на месте
+        run_download(
+            kept, MIXED_LINK, _fresh_workdir(tmp_path, "kept"), cookies_file=cookies_source
+        )
+
+
+def test_session_lost_and_nothing_usable_is_login_required(workdir, tmp_path, cookies_source):
+    info = {"id": "X", "entries": [{"id": "weird"}]}
+    with pytest.raises(LoginRequired):
+        run_download(
+            Script(info, cookies_after=SESSION_LOST),
+            MIXED_LINK,
+            workdir,
+            cookies_file=cookies_source,
+        )
+    with pytest.raises(NoMedia):  # положительный контроль: сессия на месте
+        run_download(
+            Script(info, cookies_after=SESSION_KEPT),
+            MIXED_LINK,
+            _fresh_workdir(tmp_path, "kept"),
+            cookies_file=cookies_source,
+        )
+
+
 def test_session_kept_and_no_element_succeeded_is_download_failed(workdir, cookies_source):
     """Положительный контроль к предыдущему: `sessionid` на месте — прежняя причина первого."""
     script = Script(

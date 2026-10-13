@@ -808,6 +808,49 @@ URL (`…/expire/…/ip/…/sig/…`), без query; первая версия `
 не стал: тест очистки каталога с чужими файлами — забота `pipeline` (часть C), у него и будет
 положительный контроль на реальном адаптере.
 
+### Правки по ревью части B (2): зубы (2026-10-13)
+
+Мутации — скрипт на копии дерева (rsync без `.git`, `.venv`, `data`, `.env`; окружение — основного
+дерева), по одной на прогон, `old` — ровно одно вхождение (иначе прогон помечается ошибкой),
+весь набор `tests/` без smoke, тайм-аут 120 с. Скрипт — в scratchpad сессии, в репозиторий не
+входит. Тесты после правок: 529 → 531 (+ контракт, фейк, instagram, port, config, runner).
+
+| # | Мутация | Упавшие тесты |
+|---|---|---|
+| O1 | **`session_lost()` внутри `with ydl`** (до `close()`) | 7: `test_session_lost_and_no_element_succeeded_is_login_required` (0 из 2), `test_session_lost_with_zero_of_two_is_login_required[instagram]`, `test_session_lost_with_one_of_two_gives_owner_alert[instagram]` (+4) |
+| O2 | `owner_alert` не передаётся в результат | 7, в т.ч. `test_partial_carousel_contract[video rate limited/login required-instagram]`, `test_session_lost_with_one_of_two_gives_owner_alert[instagram]` |
+| O3 | `owner_alert_of`: `RateLimited` не даёт сигнала | 5, в т.ч. `test_owner_alert_from_failed_element_while_others_succeed[RateLimited]`, `test_partial_carousel_contract[video rate limited-*]` |
+| O4 | `owner_alert_of`: потеря сессии не даёт `LoginRequired` | 5, в т.ч. `test_session_lost_without_failed_elements_still_gives_owner_alert`, `test_session_lost_with_one_of_two_gives_owner_alert[fake]` |
+| O5 | 0 из N и потеря сессии — не `LoginRequired` | 2: `test_session_lost_and_elements_failed_for_other_reasons_is_login_required`, `test_session_lost_and_nothing_usable_is_login_required` |
+| O7 | `owner_alert`: любой тип допустим | `test_owner_alert_defaults_to_none_and_accepts_only_login_or_rate_limit` |
+| F1 | фейк: `skipped=0` | 10, в т.ч. `test_partial_carousel_contract[*-fake]` |
+| F2 | фейк: `owner_alert=None` | 6, в т.ч. `test_session_lost_with_one_of_two_gives_owner_alert[fake]` |
+| F3 | фейк: потеря сессии не меняет ошибку 0 из N | `test_session_lost_with_zero_of_two_is_login_required[fake]`, `test_session_lost_gives_owner_alert_and_login_required_when_nothing_succeeded` |
+| F4 | фейк: элемент сверх лимита обрывает публикацию (как до ревью) | `test_partial_carousel_contract[video over limit-fake]`, `test_oversize_element_is_skipped_and_counted` ×2 |
+| C1 | config: `expires` без дробной части | `test_cookies_expires_follows_ytdlp_rule[дробное]` |
+| C2 | config: пустой `expires` отвергается | `test_cookies_expires_follows_ytdlp_rule[пусто — сессионный cookie]` |
+| C3 | config: любое непустое `expires` принимается | 14 (вся таблица отказов) |
+| C4 | config: `fullmatch` → `match` | 5, в т.ч. `…[точка без дробной части]`, `…[экспонента]` |
+| R1 | runner: готовый результат отбрасывается | `test_result_ready_when_timeout_fires_is_returned_not_dropped` |
+| E1 | элемент: `KeyError` обрывает карусель | `test_unexpected_data_error_on_one_element_is_a_skip_not_an_abort[KeyError]` |
+| E2 | элемент: `TypeError` обрывает карусель | 2: `…[TypeError]`, `test_unexpected_data_error_on_all_elements_is_download_failed` |
+| E3 | элемент: `ValueError` обрывает карусель | `…[ValueError]` |
+| E4 | ошибка элемента пишется в лог дважды | `test_failed_element_is_logged_once`, `test_single_failed_reel_is_logged_once` |
+
+Замечания по прогону. (1) **Первый прогон скрипта показал «все выжили»** — ошибка разбора вывода
+(`-q` без `-rf`: строки `FAILED` не печатались), а не слабость тестов; исправлено, таблица выше —
+со второго прогона. (2) **O5 при первой версии тестов выжила**: 0 из N с потерей сессии ловился
+через перевод ошибки элемента («Failed to parse JSON» + `lost` → `LoginRequired`), явная ветка
+`LoginRequired` не проверялась; добавлены тесты с посторонней причиной элементов («boom») и с
+нераспознанными элементами, у обоих — положительный контроль (сессия на месте → `DownloadFailed` /
+`NoMedia`). (3) **O6 (перевод ошибок элементов без `session_lost`) — эквивалентная мутация:**
+после O5-ветки и `owner_alert_of(…, session_lost)` аргумент `session_lost` в переводе элемента
+ничего не менял; он удалён из кода вместо того, чтобы оставлять неубиваемую мутацию. (4) Первая
+версия теста «0 из N + положительный контроль» запускала второй прогон в том же `workdir`:
+`cookies.txt` занят (`O_EXCL`) → `DownloadFailed`, который совпадал с ожидаемым в контроле —
+ложный проход; контроли идут в свежем каталоге. (5) Тест R1 детерминирован без потоков: фейковый
+пул выполняет функцию в `submit`, тайм-аут 0.
+
 ## Зубы: часть C
 
 ## Итог части A
